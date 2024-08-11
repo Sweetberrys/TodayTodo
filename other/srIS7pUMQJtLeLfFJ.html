@@ -1,0 +1,332 @@
+<html><head><base href="https://zh.example.com/todo-app/">
+<meta charset="UTF-8">
+<title>油猴脚本：高级待办事项列表</title>
+<style>
+  body {
+    font-family: 'Microsoft YaHei', sans-serif;
+    background-color: #f0f0f0;
+    margin: 0;
+    padding: 20px;
+  }
+  #app {
+    max-width: 800px;
+    margin: 0 auto;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    padding: 20px;
+  }
+  h1 {
+    color: #333;
+    text-align: center;
+  }
+  .task-form {
+    display: flex;
+    margin-bottom: 20px;
+  }
+  .task-form input {
+    flex-grow: 1;
+    padding: 10px;
+    font-size: 16px;
+    border: 1px solid #ddd;
+    border-radius: 4px 0 0 4px;
+  }
+  .task-form button {
+    padding: 10px 20px;
+    font-size: 16px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 0 4px 4px 0;
+    cursor: pointer;
+  }
+  .task-list {
+    list-style-type: none;
+    padding: 0;
+  }
+  .task-item {
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    margin-bottom: 10px;
+    padding: 10px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+  }
+  .task-item input[type="checkbox"] {
+    margin-right: 10px;
+  }
+  .task-item .task-text {
+    flex-grow: 1;
+  }
+  .task-item .task-actions {
+    display: flex;
+    gap: 5px;
+  }
+  .task-item .task-actions button {
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .filters {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .filters select {
+    padding: 5px;
+  }
+  #calendar {
+    margin-top: 20px;
+  }
+  #statistics {
+    margin-top: 20px;
+  }
+</style>
+</head>
+<body>
+  <div id="app">
+    <h1>高级待办事项列表</h1>
+    <div class="task-form">
+      <input type="text" id="newTask" placeholder="添加新任务...">
+      <button onclick="addTask()">添加</button>
+    </div>
+    <div class="filters">
+      <select id="sortBy" onchange="sortTasks()">
+        <option value="priority">按优先级排序</option>
+        <option value="dueDate">按截止日期排序</option>
+        <option value="creationDate">按创建日期排序</option>
+      </select>
+      <select id="filterBy" onchange="filterTasks()">
+        <option value="all">显示所有任务</option>
+        <option value="todo">待办任务</option>
+        <option value="inProgress">进行中</option>
+        <option value="completed">已完成</option>
+      </select>
+    </div>
+    <ul id="taskList" class="task-list"></ul>
+    <div id="calendar"></div>
+    <div id="statistics"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/moment@2.29.1/moment.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.10.2/main.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.3.2/dist/echarts.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@5.10.2/main.min.css" rel="stylesheet">
+
+  <script>
+    // ==UserScript==
+    // @name         高级待办事项列表
+    // @namespace    http://tampermonkey.net/
+    // @version      0.1
+    // @description  一个功能强大的待办事项列表管理器
+    // @match        https://zh.example.com/todo-app/*
+    // @grant        none
+    // ==/UserScript==
+
+    (function() {
+      'use strict';
+
+      let tasks = [];
+
+      function addTask() {
+        const taskInput = document.getElementById('newTask');
+        const taskText = taskInput.value.trim();
+        if (taskText) {
+          const task = {
+            id: Date.now(),
+            text: taskText,
+            completed: false,
+            priority: 'medium',
+            status: 'todo',
+            dueDate: null,
+            tags: [],
+            subtasks: [],
+            creationDate: new Date()
+          };
+          tasks.push(task);
+          taskInput.value = '';
+          renderTasks();
+          updateCalendar();
+          updateStatistics();
+        }
+      }
+
+      function renderTasks() {
+        const taskList = document.getElementById('taskList');
+        taskList.innerHTML = '';
+        tasks.forEach(task => {
+          const li = document.createElement('li');
+          li.className = 'task-item';
+          li.innerHTML = `
+            <input type="checkbox" ${task.completed ? 'checked' : ''} onchange="toggleTaskStatus(${task.id})">
+            <span class="task-text">${task.text}</span>
+            <div class="task-actions">
+              <button onclick="editTask(${task.id})">编辑</button>
+              <button onclick="deleteTask(${task.id})">删除</button>
+              <button onclick="addSubtask(${task.id})">添加子任务</button>
+            </div>
+          `;
+          taskList.appendChild(li);
+        });
+      }
+
+      function toggleTaskStatus(taskId) {
+        const task = tasks.find(t => t.id === taskId);
+        if (task) {
+          task.completed = !task.completed;
+          renderTasks();
+          updateCalendar();
+          updateStatistics();
+        }
+      }
+
+      function editTask(taskId) {
+        const task = tasks.find(t => t.id === taskId);
+        if (task) {
+          const newText = prompt('编辑任务', task.text);
+          if (newText !== null) {
+            task.text = newText.trim();
+            renderTasks();
+            updateCalendar();
+          }
+        }
+      }
+
+      function deleteTask(taskId) {
+        tasks = tasks.filter(t => t.id !== taskId);
+        renderTasks();
+        updateCalendar();
+        updateStatistics();
+      }
+
+      function addSubtask(taskId) {
+        const task = tasks.find(t => t.id === taskId);
+        if (task) {
+          const subtaskText = prompt('添加子任务');
+          if (subtaskText) {
+            task.subtasks.push({
+              id: Date.now(),
+              text: subtaskText,
+              completed: false
+            });
+            renderTasks();
+          }
+        }
+      }
+
+      function sortTasks() {
+        const sortBy = document.getElementById('sortBy').value;
+        switch (sortBy) {
+          case 'priority':
+            tasks.sort((a, b) => a.priority.localeCompare(b.priority));
+            break;
+          case 'dueDate':
+            tasks.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+            break;
+          case 'creationDate':
+            tasks.sort((a, b) => a.creationDate - b.creationDate);
+            break;
+        }
+        renderTasks();
+      }
+
+      function filterTasks() {
+        const filterBy = document.getElementById('filterBy').value;
+        const filteredTasks = tasks.filter(task => {
+          if (filterBy === 'all') return true;
+          return task.status === filterBy;
+        });
+        renderFilteredTasks(filteredTasks);
+      }
+
+      function renderFilteredTasks(filteredTasks) {
+        const taskList = document.getElementById('taskList');
+        taskList.innerHTML = '';
+        filteredTasks.forEach(task => {
+          const li = document.createElement('li');
+          li.className = 'task-item';
+          li.innerHTML = `
+            <input type="checkbox" ${task.completed ? 'checked' : ''} onchange="toggleTaskStatus(${task.id})">
+            <span class="task-text">${task.text}</span>
+            <div class="task-actions">
+              <button onclick="editTask(${task.id})">编辑</button>
+              <button onclick="deleteTask(${task.id})">删除</button>
+              <button onclick="addSubtask(${task.id})">添加子任务</button>
+            </div>
+          `;
+          taskList.appendChild(li);
+        });
+      }
+
+      function updateCalendar() {
+        const calendarEl = document.getElementById('calendar');
+        const calendar = new FullCalendar.Calendar(calendarEl, {
+          initialView: 'dayGridMonth',
+          events: tasks.map(task => ({
+            title: task.text,
+            start: task.dueDate,
+            allDay: true
+          }))
+        });
+        calendar.render();
+      }
+
+      function updateStatistics() {
+        const completedTasks = tasks.filter(task => task.completed).length;
+        const totalTasks = tasks.length;
+        const completionRate = totalTasks > 0 ? (completedTasks / totalTasks * 100).toFixed(2) : 0;
+
+        const statisticsEl = document.getElementById('statistics');
+        const chart = echarts.init(statisticsEl);
+
+        const option = {
+          title: {
+            text: '任务完成统计'
+          },
+          tooltip: {
+            trigger: 'axis'
+          },
+          legend: {
+            data: ['已完成任务', '总任务']
+          },
+          xAxis: {
+            type: 'category',
+            data: ['任务']
+          },
+          yAxis: {
+            type: 'value'
+          },
+          series: [
+            {
+              name: '已完成任务',
+              type: 'bar',
+              data: [completedTasks]
+            },
+            {
+              name: '总任务',
+              type: 'bar',
+              data: [totalTasks]
+            }
+          ]
+        };
+
+        chart.setOption(option);
+      }
+
+      // 初始化
+      renderTasks();
+      updateCalendar();
+      updateStatistics();
+
+      // 将函数暴露到全局作用域
+      window.addTask = addTask;
+      window.toggleTaskStatus = toggleTaskStatus;
+      window.editTask = editTask;
+      window.deleteTask = deleteTask;
+      window.addSubtask = addSubtask;
+      window.sortTasks = sortTasks;
+      window.filterTasks = filterTasks;
+    })();
+  </script>
+</body></html>

@@ -1,0 +1,983 @@
+<html><head><base href="https://websim.dev/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>全能任务管理系统</title>
+<script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/element-ui@2.15.9/lib/index.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-ui@2.15.9/lib/theme-chalk/index.css">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.1/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.7/dayjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+  body {
+    font-family: 'Microsoft YaHei', sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f0f2f5;
+  }
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+    padding: 20px;
+  }
+  .header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .task-list {
+    margin-bottom: 20px;
+  }
+  .task-item {
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+  .subtask-list {
+    margin-left: 20px;
+  }
+  .progress-bar {
+    height: 10px;
+    border-radius: 5px;
+    margin-top: 5px;
+  }
+  .progress-bar.red { background-color: #f56c6c; }
+  .progress-bar.yellow { background-color: #e6a23c; }
+  .progress-bar.orange { background-color: #f39c12; }
+  .progress-bar.green { background-color: #67c23a; }
+  .calendar-view {
+    margin-top: 20px;
+  }
+  .statistics {
+    margin-top: 20px;
+  }
+  .announcement {
+    background-color: #ecf5ff;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .scroll-text {
+    display: inline-block;
+    white-space: nowrap;
+    animation: scroll 20s linear infinite;
+  }
+  @keyframes scroll {
+    0% { transform: translateX(100%); }
+    100% { transform: translateX(-100%); }
+  }
+  .reminder-countdown {
+    font-weight: bold;
+    color: #409EFF;
+  }
+  #statisticsChart {
+    width: 100%;
+    height: 500px;
+  }
+</style>
+</head>
+<body>
+  <div id="app" class="container">
+    <div class="header">
+      <h1>全能任务管理系统</h1>
+    </div>
+
+    <div class="announcement">
+      <div class="scroll-text">
+        加油！你是最棒的！坚持就是胜利！相信自己，你可以做到！今天又是充满希望的一天！不要放弃，成功就在前方！每一个小进步都值得庆祝！困难只是暂时的，你终将克服！你的努力终将得到回报！
+      </div>
+    </div>
+
+    <el-tabs v-model="activeTab">
+      <el-tab-pane label="待办事项" name="todos">
+        <div class="task-list">
+          <el-input
+            v-model="searchQuery"
+            placeholder="搜索任务"
+            prefix-icon="el-icon-search"
+            @input="searchTasks"
+          ></el-input>
+
+          <el-button type="primary" @click="showAddTaskDialog">添加任务</el-button>
+          <el-button type="danger" @click="batchDeleteTasks">批量删除</el-button>
+          <el-button type="success" @click="exportToMarkdown">导出为Markdown</el-button>
+          <el-button type="warning" @click="importFromExcel">从Excel导入</el-button>
+
+          <el-select v-model="filterTag" placeholder="按标签筛选" @change="filterTasks">
+            <el-option label="全部" value=""></el-option>
+            <el-option label="工作" value="工作"></el-option>
+            <el-option label="生活" value="生活"></el-option>
+            <el-option label="学习" value="学习"></el-option>
+            <el-option label="副业" value="副业"></el-option>
+            <el-option label="自定义" value="custom">
+              <el-input v-model="customTag" placeholder="输入自定义标签"></el-input>
+            </el-option>
+          </el-select>
+
+          <el-select v-model="filterStatus" placeholder="按状态筛选" @change="filterTasks">
+            <el-option label="全部" value=""></el-option>
+            <el-option label="待完成" value="待完成"></el-option>
+            <el-option label="进行中" value="进行中"></el-option>
+            <el-option label="改进中" value="改进中"></el-option>
+            <el-option label="已完成" value="已完成"></el-option>
+          </el-select>
+
+          <el-pagination
+            @size-change="handleSizeChange"
+            @current-change="handleCurrentChange"
+            :current-page="currentPage"
+            :page-sizes="[5, 10, 20, 50]"
+            :page-size="pageSize"
+            layout="total, sizes, prev, pager, next, jumper"
+            :total="filteredTasks.length">
+          </el-pagination>
+
+          <div v-for="(task, index) in paginatedTasks" :key="task.id" class="task-item">
+            <el-checkbox v-model="task.completed" @change="updateTaskStatus(task)"></el-checkbox>
+            <span>{{ (currentPage - 1) * pageSize + index + 1 }}. {{ task.title }}</span>
+            <el-tag>{{ task.tag }}</el-tag>
+            <el-button size="mini" @click="editTask(task)">编辑</el-button>
+            <el-button size="mini" type="danger" @click="deleteTask(task)">删除</el-button>
+            <el-button size="mini" @click="showSubtasks(task)">{{ task.showSubtasks ? '收起' : '展开' }}子任务</el-button>
+            <el-progress :percentage="getTaskProgress(task)" :status="getTaskProgressStatus(task)"></el-progress>
+            <div v-if="task.showSubtasks">
+              <div v-for="(subtask, subIndex) in task.subtasks" :key="subtask.id" class="subtask-list">
+                <el-checkbox v-model="subtask.completed" @change="updateSubtaskStatus(task, subtask)"></el-checkbox>
+                <span>{{ subIndex + 1 }}. {{ subtask.title }}</span>
+                <el-button size="mini" @click="editSubtask(task, subtask)">编辑</el-button>
+                <el-button size="mini" type="danger" @click="deleteSubtask(task, subtask)">删除</el-button>
+                <el-progress :percentage="getTaskProgress(subtask)" :status="getTaskProgressStatus(subtask)"></el-progress>
+              </div>
+              <el-button size="mini" @click="addSubtask(task)">添加子任务</el-button>
+            </div>
+          </div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="日历视图" name="calendar">
+        <div class="calendar-view">
+          <el-radio-group v-model="calendarViewMode" @change="updateCalendarView">
+            <el-radio-button label="month">月视图</el-radio-button>
+            <el-radio-button label="week">周视图</el-radio-button>
+          </el-radio-group>
+          <el-calendar v-if="calendarViewMode === 'month'" v-model="calendarDate">
+            <template slot="dateCell" slot-scope="{date, data}">
+              <div @click="showDayTasks(data)">
+                {{ data.day.split('-').slice(-1)[0] }}
+                <div v-for="task in getTasksForDate(data)" :key="task.id">
+                  <el-tag size="mini">{{ task.title }}</el-tag>
+                </div>
+              </div>
+            </template>
+          </el-calendar>
+          <div v-else>
+            <el-select v-model="selectedWeek" placeholder="选择周" @change="updateWeekView">
+              <el-option
+                v-for="week in weekOptions"
+                :key="week.value"
+                :label="week.label"
+                :value="week.value"
+              ></el-option>
+            </el-select>
+            <el-table :data="weekViewData">
+              <el-table-column prop="date" label="日期"></el-table-column>
+              <el-table-column prop="tasks" label="任务">
+                <template slot-scope="scope">
+                  <div v-for="task in scope.row.tasks" :key="task.id">
+                    <el-tag size="mini" @click="showTaskDetails(task)">{{ task.title }}</el-tag>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="统计" name="statistics">
+        <div class="statistics">
+          <el-radio-group v-model="statisticsTimeRange" @change="updateStatistics">
+            <el-radio-button label="day">日</el-radio-button>
+            <el-radio-button label="week">周</el-radio-button>
+            <el-radio-button label="month">月</el-radio-button>
+            <el-radio-button label="year">年</el-radio-button>
+          </el-radio-group>
+          <el-radio-group v-model="statisticsChartType" @change="updateStatistics">
+            <el-radio-button label="bar">柱状图</el-radio-button>
+            <el-radio-button label="line">折线图</el-radio-button>
+            <el-radio-button label="pie">饼图</el-radio-button>
+          </el-radio-group>
+          <div id="statisticsChart"></div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="提醒" name="reminders">
+        <div class="reminders">
+          <el-button type="primary" @click="showAddReminderDialog">添加提醒</el-button>
+          <el-table :data="reminders">
+            <el-table-column prop="name" label="名称"></el-table-column>
+            <el-table-column prop="content" label="内容"></el-table-column>
+            <el-table-column prop="time" label="时间"></el-table-column>
+            <el-table-column prop="loopCount" label="循环次数"></el-table-column>
+            <el-table-column label="倒计时">
+              <template slot-scope="scope">
+                <span class="reminder-countdown">{{ getReminderCountdown(scope.row) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作">
+              <template slot-scope="scope">
+                <el-button size="mini" @click="pauseReminder(scope.row)">
+                  {{ scope.row.paused ? '恢复' : '暂停' }}
+                </el-button>
+                <el-button size="mini" @click="resetReminder(scope.row)">重置</el-button>
+                <el-button size="mini" type="danger" @click="deleteReminder(scope.row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+        <div class="reminder-history">
+          <h3>提醒历史</h3>
+          <el-table :data="reminderHistory">
+            <el-table-column prop="name" label="名称"></el-table-column>
+            <el-table-column prop="content" label="内容"></el-table-column>
+            <el-table-column prop="time" label="时间"></el-table-column>
+            <el-table-column label="操作">
+              <template slot-scope="scope">
+                <el-button size="mini" type="danger" @click="deleteReminderHistory(scope.row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <!-- 添加任务对话框 -->
+    <el-dialog :title="isEditing ? '编辑任务' : '添加任务'" :visible.sync="addTaskDialogVisible">
+      <el-form :model="newTask" label-width="80px">
+        <el-form-item label="标题">
+          <el-input v-model="newTask.title"></el-input>
+        </el-form-item>
+        <el-form-item label="内容">
+          <el-input type="textarea" v-model="newTask.content"></el-input>
+        </el-form-item>
+        <el-form-item label="创建时间">
+          <el-date-picker
+            v-model="newTask.creationTime"
+            type="datetime"
+            placeholder="选择创建时间"
+          ></el-date-picker>
+        </el-form-item>
+        <el-form-item label="截止时间">
+          <el-date-picker
+            v-model="newTask.deadline"
+            type="datetime"
+            placeholder="选择截止时间"
+            :picker-options="deadlinePickerOptions"
+          ></el-date-picker>
+        </el-form-item>
+        <el-form-item label="标签">
+          <el-select v-model="newTask.tag">
+            <el-option label="工作" value="工作"></el-option>
+            <el-option label="生活" value="生活"></el-option>
+            <el-option label="学习" value="学习"></el-option>
+            <el-option label="副业" value="副业"></el-option>
+            <el-option label="自定义" value="custom">
+              <el-input v-model="customTag" placeholder="输入自定义标签"></el-input>
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="newTask.status">
+            <el-option label="待完成" value="待完成"></el-option>
+            <el-option label="进行中" value="进行中"></el-option>
+            <el-option label="改进中" value="改进中"></el-option>
+            <el-option label="已完成" value="已完成"></el-option>
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="addTaskDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitTask">确定</el-button>
+      </div>
+    </el-dialog>
+
+    <!-- 添加提醒对话框 -->
+    <el-dialog title="添加提醒" :visible.sync="addReminderDialogVisible">
+      <el-form :model="newReminder" label-width="80px">
+        <el-form-item label="名称">
+          <el-input v-model="newReminder.name"></el-input>
+        </el-form-item>
+        <el-form-item label="内容">
+          <el-input type="textarea" v-model="newReminder.content"></el-input>
+        </el-form-item>
+        <el-form-item label="提醒时间">
+          <el-date-picker
+            v-model="newReminder.time"
+            type="datetime"
+            placeholder="选择提醒时间"
+          ></el-date-picker>
+        </el-form-item>
+        <el-form-item label="循环次数">
+          <el-input-number v-model="newReminder.loopCount" :min="1"></el-input-number>
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="addReminderDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="addReminder">确定</el-button>
+      </div>
+    </el-dialog>
+  </div>
+
+  <script>
+    new Vue({
+      el: '#app',
+      data: {
+        activeTab: 'todos',
+        tasks: [],
+        reminders: [],
+        reminderHistory: [],
+        searchQuery: '',
+        filterTag: '',
+        filterStatus: '',
+        customTag: '',
+        addTaskDialogVisible: false,
+        addReminderDialogVisible: false,
+        isEditing: false,
+        editingTaskIndex: -1,
+        newTask: {
+          title: '',
+          content: '',
+          creationTime: '',
+          deadline: '',
+          tag: '',
+          status: '待完成',
+          subtasks: []
+        },
+        newReminder: {
+          name: '',
+          content: '',
+          time: '',
+          loopCount: 1
+        },
+        calendarViewMode: 'month',
+        calendarDate: new Date(),
+        selectedWeek: '',
+        weekOptions: [],
+        weekViewData: [],
+        statisticsTimeRange: 'day',
+        statisticsChartType: 'bar',
+        deadlinePickerOptions: {
+          disabledDate(time) {
+            return time.getTime() < Date.now();
+          }
+        },
+        chart: null,
+        currentPage: 1,
+        pageSize: 5
+      },
+      computed: {
+        filteredTasks() {
+          return this.tasks.filter(task => {
+            const matchesSearch = task.title.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+                                  task.content.toLowerCase().includes(this.searchQuery.toLowerCase());
+            const matchesTag = !this.filterTag || task.tag === this.filterTag;
+            const matchesStatus = !this.filterStatus || task.status === this.filterStatus;
+            return matchesSearch && matchesTag && matchesStatus;
+          });
+        },
+        paginatedTasks() {
+          const start = (this.currentPage - 1) * this.pageSize;
+          const end = start + this.pageSize;
+          return this.filteredTasks.slice(start, end);
+        }
+      },
+      methods: {
+        handleSizeChange(val) {
+          this.pageSize = val;
+          this.currentPage = 1;
+        },
+        handleCurrentChange(val) {
+          this.currentPage = val;
+        },
+        showAddTaskDialog() {
+          this.isEditing = false;
+          this.addTaskDialogVisible = true;
+          this.newTask = {
+            title: '',
+            content: '',
+            creationTime: new Date(),
+            deadline: '',
+            tag: '',
+            status: '待完成',
+            subtasks: []
+          };
+        },
+        submitTask() {
+          if (this.newTask.title && this.newTask.deadline > this.newTask.creationTime) {
+            if (this.isEditing) {
+              Object.assign(this.tasks[this.editingTaskIndex], this.newTask);
+            } else {
+              const task = {
+                id: Date.now(),
+                ...this.newTask,
+                completed: false,
+                showSubtasks: false
+              };
+              this.tasks.push(task);
+            }
+            this.saveTasks();
+            this.addTaskDialogVisible = false;
+          } else {
+            this.$message.error('请填写标题并确保截止时间晚于创建时间');
+          }
+        },
+        editTask(task) {
+          this.isEditing = true;
+          this.editingTaskIndex = this.tasks.indexOf(task);
+          this.newTask = { ...task };
+          this.addTaskDialogVisible = true;
+        },
+        deleteTask(task) {
+          const index = this.tasks.indexOf(task);
+          if (index !== -1) {
+            this.tasks.splice(index, 1);
+            this.saveTasks();
+          }
+        },
+        batchDeleteTasks() {
+          this.tasks = this.tasks.filter(task => !task.completed);
+          this.saveTasks();
+        },
+        updateTaskStatus(task) {
+          task.status = task.completed ? '已完成' : '待完成';
+          this.saveTasks();
+        },
+        showSubtasks(task) {
+          task.showSubtasks = !task.showSubtasks;
+        },
+        addSubtask(task) {
+          this.$prompt('添加子任务', '请输入子任务标题', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消'
+          }).then(({ value }) => {
+            const subtask = {
+              id: Date.now(),
+              title: value,
+              content: '',
+              status: '待完成',
+              completed: false
+            };
+            task.subtasks.push(subtask);
+            this.saveTasks();
+          }).catch(() => {
+            this.$message({
+              type: 'info',
+              message: '取消添加'
+            });
+          });
+        },
+        editSubtask(task, subtask) {
+          this.$prompt('编辑子任务', '请输入新的子任务标题', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            inputValue: subtask.title
+          }).then(({ value }) => {
+            subtask.title = value;
+            this.saveTasks();
+          }).catch(() => {
+            this.$message({
+              type: 'info',
+              message: '取消编辑'
+            });
+          });
+        },
+        deleteSubtask(task, subtask) {
+          const index = task.subtasks.indexOf(subtask);
+          if (index !== -1) {
+            task.subtasks.splice(index, 1);
+            this.saveTasks();
+          }
+        },
+        updateSubtaskStatus(task, subtask) {
+          subtask.status = subtask.completed ? '已完成' : '待完成';
+          this.saveTasks();
+        },
+        getTaskProgress(task) {
+          switch (task.status) {
+            case '待完成': return 25;
+            case '进行中': return 50;
+            case '改进中': return 75;
+            case '已完成': return 100;
+            default: return 0;
+          }
+        },
+        getTaskProgressStatus(task) {
+          switch (task.status) {
+            case '待完成': return 'exception';
+            case '进行中': return 'warning';
+            case '改进中': return '';
+            case '已完成': return 'success';
+            default: return '';
+          }
+        },
+        searchTasks() {
+          // 过滤由计算属性处理
+        },
+        filterTasks() {
+          // 过滤由计算属性处理
+        },
+        exportToMarkdown() {
+          let markdown = '# 待办事项\n\n';
+          this.tasks.forEach((task, index) => {
+            markdown += `## ${index + 1}. ${task.title}\n\n`;
+            markdown += `- 内容: ${task.content}\n`;
+            markdown += `- 创建时间: ${task.creationTime}\n`;
+            markdown += `- 截止时间: ${task.deadline}\n`;
+            markdown += `- 标签: ${task.tag}\n`;
+            markdown += `- 状态: ${task.status}\n\n`;
+            if (task.subtasks.length > 0) {
+              markdown += '### 子任务\n\n';
+              task.subtasks.forEach((subtask, subIndex) => {
+                markdown += `${index + 1}.${subIndex + 1}. ${subtask.title} (${subtask.status})\n`;
+              });
+              markdown += '\n';
+            }
+          });
+          
+          const blob = new Blob([markdown], { type: 'text/markdown' });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = '待办事项.md';
+          link.click();
+        },
+        importFromExcel() {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = '.xlsx, .xls';
+          input.onchange = (e) => {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const data = new Uint8Array(e.target.result);
+              const workbook = XLSX.read(data, { type: 'array' });
+              const firstSheetName = workbook.SheetNames[0];
+              const worksheet = workbook.Sheets[firstSheetName];
+              const jsonData = XLSX.utils.sheet_to_json(worksheet);
+              
+              jsonData.forEach(row => {
+                const task = {
+                  id: Date.now(),
+                  title: row['标题'],
+                  content: row['内容'],
+                  creationTime: row['创建时间'],
+                  deadline: row['截止时间'],
+                  tag: row['标签'],
+                  status: row['状态'],
+                  completed: row['状态'] === '已完成',
+                  showSubtasks: false,
+                  subtasks: []
+                };
+                this.tasks.push(task);
+              });
+              
+              this.saveTasks();
+              this.$message.success('成功导入Excel文件');
+            };
+            reader.readAsArrayBuffer(file);
+          };
+          input.click();
+        },
+        showAddReminderDialog() {
+          this.addReminderDialogVisible = true;
+          this.newReminder = {
+            name: '',
+            content: '',
+            time: '',
+            loopCount: 1
+          };
+        },
+        addReminder() {
+          if (this.newReminder.name && this.newReminder.time) {
+            const reminder = {
+              id: Date.now(),
+              ...this.newReminder,
+              paused: false
+            };
+            this.reminders.push(reminder);
+            this.saveReminders();
+            this.addReminderDialogVisible = false;
+            this.startReminderCountdown(reminder);
+          } else {
+            this.$message.error('请填写提醒名称和时间');
+          }
+        },
+        pauseReminder(reminder) {
+          reminder.paused = !reminder.paused;
+          if (!reminder.paused) {
+            this.startReminderCountdown(reminder);
+          }
+          this.saveReminders();
+        },
+        resetReminder(reminder) {
+          reminder.time = new Date(Date.now() + 24 * 60 * 60 * 1000); // 重置为24小时后
+          reminder.paused = false;
+          this.startReminderCountdown(reminder);
+          this.saveReminders();
+        },
+        deleteReminder(reminder) {
+          const index = this.reminders.indexOf(reminder);
+          if (index !== -1) {
+            this.reminders.splice(index, 1);
+            this.saveReminders();
+          }
+        },
+        startReminderCountdown(reminder) {
+          if (reminder.paused) return;
+
+          const now = new Date();
+          const reminderTime = new Date(reminder.time);
+          const timeUntilReminder = reminderTime.getTime() - now.getTime();
+
+          if (timeUntilReminder > 0) {
+            setTimeout(() => {
+              this.showReminderNotification(reminder);
+              if (reminder.loopCount > 1 || reminder.loopCount === -1) {
+                reminder.loopCount = reminder.loopCount === -1 ? -1 : reminder.loopCount - 1;
+                reminder.time = new Date(reminderTime.getTime() + 24 * 60 * 60 * 1000); // 添加1天
+                this.startReminderCountdown(reminder);
+              } else {
+                this.moveReminderToHistory(reminder);
+              }
+            }, timeUntilReminder);
+          } else {
+            this.moveReminderToHistory(reminder);
+          }
+        },
+        showReminderNotification(reminder) {
+          this.$notify({
+            title: reminder.name,
+            message: reminder.content,
+            duration: 0,
+            position: 'bottom-right'
+          });
+        },
+        moveReminderToHistory(reminder) {
+          const index = this.reminders.indexOf(reminder);
+          if (index !== -1) {
+            this.reminders.splice(index, 1);
+            this.reminderHistory.push({...reminder, completedTime: new Date()});
+            this.saveReminders();
+            this.saveReminderHistory();
+          }
+        },
+        deleteReminderHistory(historyItem) {
+          const index = this.reminderHistory.indexOf(historyItem);
+          if (index !== -1) {
+            this.reminderHistory.splice(index, 1);
+            this.saveReminderHistory();
+          }
+        },
+        getReminderCountdown(reminder) {
+          const now = new Date();
+          const reminderTime = new Date(reminder.time);
+          const diff = reminderTime - now;
+          
+          if (diff <= 0) return '已过期';
+          
+          const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+          const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+          const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+          
+          return `${days}天 ${hours}小时 ${minutes}分钟`;
+        },
+        updateCalendarView() {
+          if (this.calendarViewMode === 'week') {
+            this.generateWeekOptions();
+          }
+        },
+        generateWeekOptions() {
+          const currentDate = new Date();
+          const currentYear = currentDate.getFullYear();
+          const currentMonth = currentDate.getMonth();
+          const currentDay = currentDate.getDate();
+          const weeks = [];
+
+          for (let i = 0; i < 4; i++) {
+            const weekStart = new Date(currentYear, currentMonth, currentDay - currentDate.getDay() + i * 7);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 6);
+            weeks.push({
+              value: weekStart.toISOString(),
+              label: `${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`
+            });
+          }
+
+          this.weekOptions = weeks;
+          this.selectedWeek = weeks[0].value;
+          this.updateWeekView();
+        },
+        updateWeekView() {
+          const weekStart = new Date(this.selectedWeek);
+          const weekData = [];
+
+          for (let i = 0; i < 7; i++) {
+            const currentDate = new Date(weekStart);
+            currentDate.setDate(currentDate.getDate() + i);
+            weekData.push({
+              date: currentDate.toLocaleDateString(),
+              tasks: this.getTasksForDate({ day: currentDate.toISOString().split('T')[0] })
+            });
+          }
+
+          this.weekViewData = weekData;
+        },
+        getTasksForDate(data) {
+          const date = new Date(data.day);
+          return this.tasks.filter(task => {
+            const taskDate = new Date(task.deadline);
+            return taskDate.toDateString() === date.toDateString();
+          });
+        },
+        showDayTasks(data) {
+          const tasks = this.getTasksForDate(data);
+          if (tasks.length > 0) {
+            const content = tasks.map(task => `<p>${task.title}: ${task.content}</p>`).join('');
+            this.$alert(content, data.day, {
+              dangerouslyUseHTMLString: true
+            });
+          }
+        },
+        showTaskDetails(task) {
+          const content = `
+            <p><strong>标题:</strong> ${task.title}</p>
+            <p><strong>内容:</strong> ${task.content}</p>
+            <p><strong>创建时间:</strong> ${task.creationTime}</p>
+            <p><strong>截止时间:</strong> ${task.deadline}</p>
+            <p><strong>标签:</strong> ${task.tag}</p>
+            <p><strong>状态:</strong> ${task.status}</p>
+            ${task.subtasks.length > 0 ? '<p><strong>子任务:</strong></p>' + 
+              task.subtasks.map(subtask => `<p>- ${subtask.title} (${subtask.status})</p>`).join('') : ''}
+          `;
+          this.$alert(content, '任务详情', {
+            dangerouslyUseHTMLString: true
+          });
+        },
+        updateStatistics() {
+          const tasksInRange = this.getTasksInTimeRange();
+          const statusCounts = {
+            '待完成': 0,
+            '进行中': 0,
+            '改进中': 0,
+            '已完成': 0
+          };
+          const tagCounts = {};
+
+          tasksInRange.forEach(task => {
+            statusCounts[task.status]++;
+            tagCounts[task.tag] = (tagCounts[task.tag] || 0) + 1;
+          });
+
+          this.renderChart(statusCounts, tagCounts);
+        },
+        getTasksInTimeRange() {
+          const now = new Date();
+          let startDate;
+
+          switch (this.statisticsTimeRange) {
+            case 'day':
+              startDate = new Date(now.setHours(0, 0, 0, 0));
+              break;
+            case 'week':
+              startDate = new Date(now.setDate(now.getDate() - now.getDay()));
+              break;
+            case 'month':
+              startDate = new Date(now.setDate(1));
+              break;
+            case 'year':
+              startDate = new Date(now.setMonth(0, 1));
+              break;
+          }
+
+          return this.tasks.filter(task => new Date(task.creationTime) >= startDate);
+        },
+        renderChart(statusCounts, tagCounts) {
+          if (this.chart) {
+            this.chart.dispose();
+          }
+
+          this.chart = echarts.init(document.getElementById('statisticsChart'));
+
+          let option;
+
+          switch (this.statisticsChartType) {
+            case 'bar':
+              option = this.getBarChartOption(statusCounts, tagCounts);
+              break;
+            case 'line':
+              option = this.getLineChartOption(statusCounts, tagCounts);
+              break;
+            case 'pie':
+              option = this.getPieChartOption(statusCounts, tagCounts);
+              break;
+          }
+
+          this.chart.setOption(option);
+        },
+        getBarChartOption(statusCounts, tagCounts) {
+          return {
+            title: {
+              text: '任务统计'
+            },
+            tooltip: {},
+            legend: {
+              data: ['状态', '标签']
+            },
+            xAxis: {
+              data: Object.keys(statusCounts).concat(Object.keys(tagCounts))
+            },
+            yAxis: {},
+            series: [{
+              name: '状态',
+              type: 'bar',
+              data: Object.values(statusCounts)
+            }, {
+              name: '标签',
+              type: 'bar',
+              data: Object.values(tagCounts)
+            }]
+          };
+        },
+        getLineChartOption(statusCounts, tagCounts) {
+          return {
+            title: {
+              text: '任务统计'
+            },
+            tooltip: {},
+            legend: {
+              data: ['状态', '标签']
+            },
+            xAxis: {
+              data: Object.keys(statusCounts).concat(Object.keys(tagCounts))
+            },
+            yAxis: {},
+            series: [{
+              name: '状态',
+              type: 'line',
+              data: Object.values(statusCounts)
+            }, {
+              name: '标签',
+              type: 'line',
+              data: Object.values(tagCounts)
+            }]
+          };
+        },
+        getPieChartOption(statusCounts, tagCounts) {
+          return {
+            title: {
+              text: '任务统计'
+            },
+            tooltip: {
+              trigger: 'item',
+              formatter: '{a} <br/>{b}: {c} ({d}%)'
+            },
+            legend: {
+              orient: 'vertical',
+              left: 10,
+              data: Object.keys(statusCounts).concat(Object.keys(tagCounts))
+            },
+            series: [
+              {
+                name: '状态',
+                type: 'pie',
+                radius: ['50%', '70%'],
+                avoidLabelOverlap: false,
+                label: {
+                  show: false,
+                  position: 'center'
+                },
+                emphasis: {
+                  label: {
+                    show: true,
+                    fontSize: '30',
+                    fontWeight: 'bold'
+                  }
+                },
+                labelLine: {
+                  show: false
+                },
+                data: Object.keys(statusCounts).map(key => ({
+                  value: statusCounts[key],
+                  name: key
+                }))
+              },
+              {
+                name: '标签',
+                type: 'pie',
+                radius: ['0%', '30%'],
+                avoidLabelOverlap: false,
+                label: {
+                  show: false,
+                  position: 'center'
+                },
+                emphasis: {
+                  label: {
+                    show: true,
+                    fontSize: '30',
+                    fontWeight: 'bold'
+                  }
+                },
+                labelLine: {
+                  show: false
+                },
+                data: Object.keys(tagCounts).map(key => ({
+                  value: tagCounts[key],
+                  name: key
+                }))
+              }
+            ]
+          };
+        },
+        saveTasks() {
+          localStorage.setItem('tasks', JSON.stringify(this.tasks));
+        },
+        loadTasks() {
+          const savedTasks = localStorage.getItem('tasks');
+          if (savedTasks) {
+            this.tasks = JSON.parse(savedTasks);
+          }
+        },
+        saveReminders() {
+          localStorage.setItem('reminders', JSON.stringify(this.reminders));
+        },
+        loadReminders() {
+          const savedReminders = localStorage.getItem('reminders');
+          if (savedReminders) {
+            this.reminders = JSON.parse(savedReminders);
+            this.reminders.forEach(reminder => this.startReminderCountdown(reminder));
+          }
+        },
+        saveReminderHistory() {
+          localStorage.setItem('reminderHistory', JSON.stringify(this.reminderHistory));
+        },
+        loadReminderHistory() {
+          const savedReminderHistory = localStorage.getItem('reminderHistory');
+          if (savedReminderHistory) {
+            this.reminderHistory = JSON.parse(savedReminderHistory);
+          }
+        }
+      },
+      mounted() {
+        this.loadTasks();
+        this.loadReminders();
+        this.loadReminderHistory();
+        this.updateCalendarView();
+        this.updateStatistics();
+      }
+    });
+  </script>
+</body>
+</html>

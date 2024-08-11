@@ -1,0 +1,708 @@
+<html><head><base href="https://websim.example.com/todo-app-enhanced-v2/zh/">
+<meta charset="UTF-8">
+<title>高级待办事项管理系统</title>
+<link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+<script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+<script src="https://unpkg.com/element-ui/lib/index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.2/dist/echarts.min.js"></script>
+<style>
+  body {
+    font-family: 'Microsoft YaHei', '微软雅黑', sans-serif;
+    background-color: #f0f2f5;
+    margin: 0;
+    padding: 20px;
+  }
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .task-form, .reminder-form {
+    margin-bottom: 20px;
+  }
+  .calendar-day {
+    height: 100px;
+    overflow-y: auto;
+  }
+  .calendar-task {
+    font-size: 12px;
+    padding: 2px;
+    margin-bottom: 2px;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .status-pending { background-color: #ff4d4f; color: white; }
+  .status-inprogress { background-color: #faad14; color: white; }
+  .status-improving { background-color: #fa8c16; color: white; }
+  .status-completed { background-color: #52c41a; color: white; }
+  .subtasks {
+    margin-left: 20px;
+    border-left: 1px solid #ddd;
+    padding-left: 10px;
+  }
+  .chart-container {
+    height: 400px;
+    margin-bottom: 20px;
+  }
+</style>
+</head>
+<body>
+  <div id="app" class="container">
+    <h1>高级待办事项管理系统</h1>
+    
+    <el-tabs v-model="activeTab">
+      <el-tab-pane label="任务列表" name="taskList">
+        <h2>模块1：待办任务</h2>
+        <el-form class="task-form" :inline="true">
+          <el-form-item>
+            <el-input v-model="newTask.title" placeholder="任务标题"></el-input>
+          </el-form-item>
+          <el-form-item>
+            <el-input v-model="newTask.content" placeholder="任务内容"></el-input>
+          </el-form-item>
+          <el-form-item>
+            <el-date-picker v-model="newTask.creationTime" type="datetime" placeholder="创建时间"></el-date-picker>
+          </el-form-item>
+          <el-form-item>
+            <el-date-picker v-model="newTask.deadline" type="datetime" placeholder="截止时间"></el-date-picker>
+          </el-form-item>
+          <el-form-item>
+            <el-select v-model="newTask.status" placeholder="任务状态">
+              <el-option label="待处理" value="pending"></el-option>
+              <el-option label="进行中" value="inprogress"></el-option>
+              <el-option label="改进中" value="improving"></el-option>
+              <el-option label="已完成" value="completed"></el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select v-model="newTask.label" placeholder="任务标签" @change="handleLabelChange">
+              <el-option label="工作" value="work"></el-option>
+              <el-option label="生活" value="life"></el-option>
+              <el-option label="学习" value="study"></el-option>
+              <el-option label="副业" value="sideline"></el-option>
+              <el-option label="自定义" value="custom"></el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="newTask.label === 'custom'">
+            <el-input v-model="newTask.customLabel" placeholder="自定义标签"></el-input>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="addTask">{{ editingTaskId ? '更新任务' : '添加任务' }}</el-button>
+            <el-button v-if="editingTaskId" @click="cancelEdit">取消编辑</el-button>
+          </el-form-item>
+        </el-form>
+
+        <el-row>
+          <el-col :span="8">
+            <el-upload
+              class="upload-demo"
+              action="#"
+              :on-change="handleFileChange"
+              :auto-upload="false"
+              :show-file-list="false"
+              accept=".xlsx, .xls">
+              <el-button size="small" type="primary">导入任务</el-button>
+            </el-upload>
+          </el-col>
+          <el-col :span="8">
+            <el-button size="small" type="success" @click="exportTasks">导出任务</el-button>
+          </el-col>
+          <el-col :span="8">
+            <el-button type="danger" @click="batchDelete" :disabled="multipleSelection.length === 0">批量删除</el-button>
+          </el-col>
+        </el-row>
+
+        <el-table :data="filteredTasks" style="width: 100%" @selection-change="handleSelectionChange">
+          <el-table-column type="selection" width="55"></el-table-column>
+          <el-table-column prop="title" label="标题"></el-table-column>
+          <el-table-column prop="content" label="内容"></el-table-column>
+          <el-table-column prop="creationTime" label="创建时间" :formatter="formatDate"></el-table-column>
+          <el-table-column prop="deadline" label="截止时间" :formatter="formatDate"></el-table-column>
+          <el-table-column prop="status" label="状态">
+            <template slot-scope="scope">
+              <el-tag :type="getStatusType(scope.row.status)">{{ scope.row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="label" label="标签"></el-table-column>
+          <el-table-column label="进度条" width="200">
+            <template slot-scope="scope">
+              <el-progress :percentage="getProgressPercentage(scope.row.status)" :status="getProgressStatus(scope.row.status)"></el-progress>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="300">
+            <template slot-scope="scope">
+              <el-button size="mini" @click="editTask(scope.row)">编辑</el-button>
+              <el-button size="mini" type="danger" @click="deleteTask(scope.row)">删除</el-button>
+              <el-button size="mini" type="success" @click="addSubtask(scope.row)">添加子任务</el-button>
+              <el-select v-model="scope.row.status" size="mini" @change="updateTaskStatus(scope.row)">
+                <el-option label="待处理" value="pending"></el-option>
+                <el-option label="进行中" value="inprogress"></el-option>
+                <el-option label="改进中" value="improving"></el-option>
+                <el-option label="已完成" value="completed"></el-option>
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column type="expand">
+            <template slot-scope="props">
+              <div class="subtasks">
+                <h4>子任务</h4>
+                <el-table :data="props.row.subtasks" style="width: 100%">
+                  <el-table-column prop="title" label="标题"></el-table-column>
+                  <el-table-column prop="content" label="内容"></el-table-column>
+                  <el-table-column prop="status" label="状态">
+                    <template slot-scope="scope">
+                      <el-tag :type="getStatusType(scope.row.status)">{{ scope.row.status }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="300">
+                    <template slot-scope="scope">
+                      <el-button size="mini" @click="editSubtask(props.row, scope.row)">编辑</el-button>
+                      <el-button size="mini" type="danger" @click="deleteSubtask(props.row, scope.row)">删除</el-button>
+                      <el-select v-model="scope.row.status" size="mini" @change="updateSubtaskStatus(props.row, scope.row)">
+                        <el-option label="待处理" value="pending"></el-option>
+                        <el-option label="进行中" value="inprogress"></el-option>
+                        <el-option label="改进中" value="improving"></el-option>
+                        <el-option label="已完成" value="completed"></el-option>
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="日历视图" name="calendar">
+        <el-calendar v-model="calendarDate">
+          <template slot="dateCell" slot-scope="{date, data}">
+            <div class="calendar-day">
+              <div>{{ data.day.split('-').slice(-1)[0] }}</div>
+              <div v-for="task in getTasksForDate(date)" :key="task.id" class="calendar-task" :class="'status-' + task.status" @click="showTaskDetails(task)">
+                {{ task.title }}
+              </div>
+            </div>
+          </template>
+        </el-calendar>
+      </el-tab-pane>
+
+      <el-tab-pane label="统计视图" name="statistics">
+        <el-select v-model="statsPeriod" placeholder="选择统计周期" @change="updateCharts">
+          <el-option label="每日任务" value="daily"></el-option>
+          <el-option label="每周任务" value="weekly"></el-option>
+          <el-option label="每月任务" value="monthly"></el-option>
+          <el-option label="每年任务" value="yearly"></el-option>
+        </el-select>
+        <div id="barChart" class="chart-container"></div>
+        <div id="lineChart" class="chart-container"></div>
+        <div id="pieChart" class="chart-container"></div>
+      </el-tab-pane>
+
+      <el-tab-pane label="待办提醒" name="reminders">
+        <h2>模块2：待办提醒</h2>
+        <el-form :inline="true" class="reminder-form">
+          <el-form-item>
+            <el-input v-model="newReminder.name" placeholder="提醒名称"></el-input>
+          </el-form-item>
+          <el-form-item>
+            <el-input v-model="newReminder.content" placeholder="提醒内容"></el-input>
+          </el-form-item>
+          <el-form-item>
+            <el-date-picker v-model="newReminder.time" type="datetime" placeholder="提醒时间"></el-date-picker>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="setReminder">设置提醒</el-button>
+          </el-form-item>
+        </el-form>
+
+        <el-table :data="reminders" style="width: 100%">
+          <el-table-column prop="name" label="名称"></el-table-column>
+          <el-table-column prop="content" label="内容"></el-table-column>
+          <el-table-column prop="time" label="提醒时间" :formatter="formatDate"></el-table-column>
+          <el-table-column label="倒计时">
+            <template slot-scope="scope">
+              {{ getCountdown(scope.row) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作">
+            <template slot-scope="scope">
+              <el-button size="mini" type="danger" @click="deleteReminder(scope.row)">删除</el-button>
+              <el-button size="mini" @click="toggleReminderPause(scope.row)">
+                {{ scope.row.paused ? '继续' : '暂停' }}
+              </el-button>
+              <el-button size="mini" @click="resetReminder(scope.row)">重置</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+    </el-tabs>
+
+    <el-dialog title="任务详情" :visible.sync="taskDetailVisible">
+      <div v-if="selectedTask">
+        <h3>{{ selectedTask.title }}</h3>
+        <p><strong>内容：</strong>{{ selectedTask.content }}</p>
+        <p><strong>创建时间：</strong>{{ formatDate(null, null, selectedTask.creationTime) }}</p>
+        <p><strong>截止时间：</strong>{{ formatDate(null, null, selectedTask.deadline) }}</p>
+        <p><strong>状态：</strong>{{ selectedTask.status }}</p>
+        <p><strong>标签：</strong>{{ selectedTask.label }}</p>
+        <h4>子任务：</h4>
+        <ul>
+          <li v-for="subtask in selectedTask.subtasks" :key="subtask.id">
+            {{ subtask.title }} - {{ subtask.status }}
+          </li>
+        </ul>
+      </div>
+    </el-dialog>
+  </div>
+
+  <script>
+    new Vue({
+      el: '#app',
+      data: {
+        activeTab: 'taskList',
+        tasks: JSON.parse(localStorage.getItem('tasks')) || [],
+        reminders: JSON.parse(localStorage.getItem('reminders')) || [],
+        newTask: {
+          title: '',
+          content: '',
+          creationTime: '',
+          deadline: '',
+          status: 'pending',
+          label: '',
+          customLabel: ''
+        },
+        newReminder: {
+          name: '',
+          content: '',
+          time: ''
+        },
+        multipleSelection: [],
+        calendarDate: new Date(),
+        editingTaskId: null,
+        editingSubtaskId: null,
+        statsPeriod: 'daily',
+        barChart: null,
+        lineChart: null,
+        pieChart: null,
+        taskDetailVisible: false,
+        selectedTask: null
+      },
+      computed: {
+        filteredTasks() {
+          return this.tasks;
+        }
+      },
+      methods: {
+        addTask() {
+          if (this.editingTaskId) {
+            const taskIndex = this.tasks.findIndex(t => t.id === this.editingTaskId);
+            if (taskIndex !== -1) {
+              this.tasks[taskIndex] = { ...this.tasks[taskIndex], ...this.newTask };
+            }
+            this.editingTaskId = null;
+          } else {
+            const task = {
+              id: Date.now(),
+              title: this.newTask.title,
+              content: this.newTask.content,
+              creationTime: this.newTask.creationTime || new Date().toISOString(),
+              deadline: this.newTask.deadline,
+              status: this.newTask.status,
+              label: this.newTask.label === 'custom' ? this.newTask.customLabel : this.newTask.label,
+              subtasks: []
+            };
+            this.tasks.push(task);
+          }
+          this.saveTasks();
+          this.resetNewTask();
+          this.updateCharts();
+        },
+        editTask(task) {
+          this.editingTaskId = task.id;
+          this.newTask = { ...task };
+        },
+        cancelEdit() {
+          this.editingTaskId = null;
+          this.resetNewTask();
+        },
+        deleteTask(task) {
+          this.tasks = this.tasks.filter(t => t.id !== task.id);
+          this.saveTasks();
+          this.updateCharts();
+        },
+        addSubtask(parentTask) {
+          this.$prompt('请输入子任务标题', '添加子任务', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消'
+          }).then(({ value: title }) => {
+            if (title) {
+              this.$prompt('请输入子任务内容', '添加子任务', {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消'
+              }).then(({ value: content }) => {
+                const subtask = {
+                  id: Date.now(),
+                  title: title,
+                  content: content,
+                  status: 'pending'
+                };
+                parentTask.subtasks.push(subtask);
+                this.saveTasks();
+                this.updateCharts();
+              });
+            }
+          });
+        },
+        editSubtask(parentTask, subtask) {
+          this.$prompt('编辑子任务标题', '编辑子任务', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            inputValue: subtask.title
+          }).then(({ value: title }) => {
+            if (title) {
+              this.$prompt('编辑子任务内容', '编辑子任务', {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputValue: subtask.content
+              }).then(({ value: content }) => {
+                subtask.title = title;
+                subtask.content = content;
+                this.saveTasks();
+                this.updateCharts();
+              });
+            }
+          });
+        },
+        deleteSubtask(parentTask, subtask) {
+          parentTask.subtasks = parentTask.subtasks.filter(s => s.id !== subtask.id);
+          this.saveTasks();
+          this.updateCharts();
+        },
+        updateTaskStatus(task) {
+          this.saveTasks();
+          this.updateCharts();
+        },
+        updateSubtaskStatus(parentTask, subtask) {
+          this.saveTasks();
+          this.updateCharts();
+        },
+        handleSelectionChange(val) {
+          this.multipleSelection = val;
+        },
+        batchDelete() {
+          const idsToDelete = this.multipleSelection.map(task => task.id);
+          this.tasks = this.tasks.filter(task => !idsToDelete.includes(task.id));
+          this.saveTasks();
+          this.updateCharts();
+        },
+        handleFileChange(file) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const json = XLSX.utils.sheet_to_json(worksheet);
+
+            json.forEach(row => {
+              this.tasks.push({
+                id: Date.now(),
+                title: row['任务标题'],
+                content: row['任务内容'],
+                creationTime: row['创建时间'] || new Date().toISOString(),
+                deadline: row['截止时间'],
+                status: row['状态'] || 'pending',
+                label: row['标签'] || 'work',
+                subtasks: []
+              });
+            });
+
+            this.saveTasks();
+            this.updateCharts();
+          };
+          reader.readAsArrayBuffer(file.raw);
+        },
+        exportTasks() {
+          const worksheet = XLSX.utils.json_to_sheet(this.tasks.map(task => ({
+            '任务标题': task.title,
+            '任务内容': task.content,
+            '创建时间': task.creationTime,
+            '截止时间': task.deadline,
+            '状态': task.status,
+            '标签': task.label
+          })));
+
+          const workbook = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(workbook, worksheet, "Tasks");
+          XLSX.writeFile(workbook, "tasks.xlsx");
+        },
+        setReminder() {
+          const reminder = {
+            id: Date.now(),
+            name: this.newReminder.name,
+            content: this.newReminder.content,
+            time: this.newReminder.time,
+            paused: false,
+            originalTime: new Date(this.newReminder.time).getTime()
+          };
+
+          this.reminders.push(reminder);
+          this.saveReminders();
+
+          this.$message({
+            message: '提醒已设置！',
+            type: 'success'
+          });
+
+          this.resetNewReminder();
+        },
+        showReminder(reminder) {
+          this.$notify({
+            title: reminder.name,
+            message: reminder.content,
+            duration: 0
+          });
+
+          // Vibration
+          if ('vibrate' in navigator) {
+            navigator.vibrate([200, 100, 200]);
+          }
+
+          this.reminders = this.reminders.filter(r => r.id !== reminder.id);
+          this.saveReminders();
+        },
+        deleteReminder(reminder) {
+          this.reminders = this.reminders.filter(r => r.id !== reminder.id);
+          this.saveReminders();
+        },
+        toggleReminderPause(reminder) {
+          reminder.paused = !reminder.paused;
+          if (!reminder.paused) {
+            reminder.time = new Date(Date.now() + this.getMillisecondsLeft(reminder)).toISOString();
+          }
+          this.saveReminders();
+        },
+        resetReminder(reminder) {
+          reminder.time = new Date(Date.now() + (reminder.originalTime - Date.now())).toISOString();
+          reminder.paused = false;
+          this.saveReminders();
+        },
+        getCountdown(reminder) {
+          const now = new Date();
+          const targetTime = new Date(reminder.time);
+          const diff = targetTime - now;
+          
+          if (diff <= 0 || reminder.paused) {
+            return '00:00:00';
+          }
+
+          const hours = Math.floor(diff / 3600000);
+          const minutes = Math.floor((diff % 3600000) / 60000);
+          const seconds = Math.floor((diff % 60000) / 1000);
+
+          return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        },
+        getMillisecondsLeft(reminder) {
+          const now = new Date();
+          const targetTime = new Date(reminder.time);
+          return Math.max(0, targetTime - now);
+        },
+        handleLabelChange(value) {
+          if (value !== 'custom') {
+            this.newTask.customLabel = '';
+          }
+        },
+        getTasksForDate(date) {
+          return this.tasks.filter(task => {
+            const taskDate = new Date(task.creationTime);
+            return taskDate.toDateString() === date.toDateString();
+          });
+        },
+        formatDate(row, column, cellValue) {
+          return new Date(cellValue).toLocaleString();
+        },
+        getStatusType(status) {
+          const types = {
+            pending: '',
+            inprogress: 'warning',
+            improving: 'warning',
+            completed: 'success'
+          };
+          return types[status] || '';
+        },
+        getProgressPercentage(status) {
+          const percentages = {
+            pending: 0,
+            inprogress: 50,
+            improving: 75,
+            completed: 100
+          };
+          return percentages[status] || 0;
+        },
+        getProgressStatus(status) {
+          const statuses = {
+            pending: 'exception',
+            inprogress: '',
+            improving: 'warning',
+            completed: 'success'
+          };
+          return statuses[status] || '';
+        },
+        saveTasks() {
+          localStorage.setItem('tasks', JSON.stringify(this.tasks));
+        },
+        saveReminders() {
+          localStorage.setItem('reminders', JSON.stringify(this.reminders));
+        },
+        resetNewTask() {
+          this.newTask = {
+            title: '',
+            content: '',
+            creationTime: '',
+            deadline: '',
+            status: 'pending',
+            label: '',
+            customLabel: ''
+          };
+        },
+        resetNewReminder() {
+          this.newReminder = {
+            name: '',
+            content: '',
+            time: ''
+          };
+        },
+        initCharts() {
+          this.barChart = echarts.init(document.getElementById('barChart'));
+          this.lineChart = echarts.init(document.getElementById('lineChart'));
+          this.pieChart = echarts.init(document.getElementById('pieChart'));
+          this.updateCharts();
+        },
+        updateCharts() {
+          const data = this.getChartData();
+          
+          // Bar Chart
+          this.barChart.setOption({
+            title: { text: '任务统计' },
+            tooltip: {},
+            xAxis: { data: data.labels },
+            yAxis: {},
+            series: [{
+              name: '任务数',
+              type: 'bar',
+              data: data.counts
+            }]
+          });
+
+          // Line Chart
+          this.lineChart.setOption({
+            title: { text: '任务趋势' },
+            tooltip: {},
+            xAxis: { type: 'category', data: data.labels },
+            yAxis: {},
+            series: [{
+              name: '任务数',
+              type: 'line',
+              data: data.counts
+            }]
+          });
+
+          // Pie Chart
+          this.pieChart.setOption({
+            title: { text: '任务状态分布' },
+            tooltip: {},
+            series: [{
+              name: '任务状态',
+              type: 'pie',
+              data: [
+                { value: data.statusCounts.pending, name: '待处理' },
+                { value: data.statusCounts.inprogress, name: '进行中' },
+                { value: data.statusCounts.improving, name: '改进中' },
+                { value: data.statusCounts.completed, name: '已完成' }
+              ]
+            }]
+          });
+        },
+        getChartData() {
+          const now = new Date();
+          let labels = [];
+          let counts = [];
+          let statusCounts = { pending: 0, inprogress: 0, improving: 0, completed: 0 };
+
+          switch (this.statsPeriod) {
+            case 'daily':
+              for (let i = 6; i >= 0; i--) {
+                const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+                labels.push(date.toLocaleDateString());
+                counts.push(this.getTasksForDate(date).length);
+              }
+              break;
+            case 'weekly':
+              for (let i = 3; i >= 0; i--) {
+                const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i * 7);
+                const endDate = new Date(startDate.getTime() + 6 * 24 * 60 * 60 * 1000);
+                labels.push(`${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`);
+                counts.push(this.getTasksForDateRange(startDate, endDate).length);
+              }
+              break;
+            case 'monthly':
+              for (let i = 5; i >= 0; i--) {
+                const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                labels.push(date.toLocaleDateString('default', { year: 'numeric', month: 'short' }));
+                counts.push(this.getTasksForMonth(date).length);
+              }
+              break;
+            case 'yearly':
+              for (let i = 4; i >= 0; i--) {
+                const year = now.getFullYear() - i;
+                labels.push(year.toString());
+                counts.push(this.getTasksForYear(year).length);
+              }
+              break;
+          }
+
+          this.tasks.forEach(task => {
+            statusCounts[task.status]++;
+          });
+
+          return { labels, counts, statusCounts };
+        },
+        getTasksForDateRange(startDate, endDate) {
+          return this.tasks.filter(task => {
+            const taskDate = new Date(task.creationTime);
+            return taskDate >= startDate && taskDate <= endDate;
+          });
+        },
+        getTasksForMonth(date) {
+          return this.tasks.filter(task => {
+            const taskDate = new Date(task.creationTime);
+            return taskDate.getFullYear() === date.getFullYear() && taskDate.getMonth() === date.getMonth();
+          });
+        },
+        getTasksForYear(year) {
+          return this.tasks.filter(task => {
+            const taskDate = new Date(task.creationTime);
+            return taskDate.getFullYear() === year;
+          });
+        },
+        showTaskDetails(task) {
+          this.selectedTask = task;
+          this.taskDetailVisible = true;
+        }
+      },
+      mounted() {
+        this.initCharts();
+        setInterval(() => {
+          const now = new Date();
+          this.reminders.forEach(reminder => {
+            if (!reminder.paused && new Date(reminder.time) <= now) {
+              this.showReminder(reminder);
+            }
+          });
+          this.$forceUpdate(); // 强制更新视图以刷新倒计时
+        }, 1000); // 每秒检查一次
+      }
+    });
+  </script>
+</body>
+</html>

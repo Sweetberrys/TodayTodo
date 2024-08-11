@@ -1,0 +1,787 @@
+<html><head><base href="https://websim.creation.engine/chinese-todo-app/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>高效待办事项管理系统</title>
+<link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+<script src="https://unpkg.com/vue@2.6.14/dist/vue.js"></script>
+<script src="https://unpkg.com/element-ui/lib/index.js"></script>
+<script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.2/dist/echarts.min.js"></script>
+<style>
+  body {
+    font-family: 'Microsoft YaHei', sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f0f2f5;
+  }
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .header {
+    text-align: center;
+    margin-bottom: 30px;
+  }
+  .announcement {
+    background-color: #e6f7ff;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+  }
+  .todo-list {
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  }
+  .calendar-view {
+    margin-top: 30px;
+  }
+  .statistics-view {
+    margin-top: 30px;
+  }
+  .reminder-section {
+    margin-top: 30px;
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  }
+</style>
+</head>
+<body>
+  <div id="app" class="container">
+    <header class="header">
+      <h1>高效待办事项管理系统</h1>
+    </header>
+
+    <div class="announcement">
+      <el-carousel height="40px" direction="vertical" :autoplay="true">
+        <el-carousel-item v-for="(item, index) in announcements" :key="index">
+          <p>{{ item }}</p>
+        </el-carousel-item>
+      </el-carousel>
+    </div>
+
+    <div class="todo-list">
+      <el-row :gutter="20">
+        <el-col :span="12">
+          <el-input
+            v-model="searchQuery"
+            placeholder="搜索待办事项（标题或内容）"
+            @input="searchTodos"
+          >
+            <el-button slot="append" icon="el-icon-search"></el-button>
+          </el-input>
+        </el-col>
+        <el-col :span="12">
+          <el-button type="primary" @click="showAddTodoDialog">添加待办事项</el-button>
+          <el-button type="danger" @click="batchDeleteTodos">批量删除</el-button>
+          <el-button type="success" @click="exportToMarkdown">导出为Markdown</el-button>
+          <el-button type="warning" @click="importFromExcel">从Excel导入</el-button>
+        </el-col>
+      </el-row>
+
+      <el-table
+        :data="filteredTodos"
+        style="width: 100%; margin-top: 20px;"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="55"></el-table-column>
+        <el-table-column prop="title" label="标题" width="180"></el-table-column>
+        <el-table-column prop="content" label="内容"></el-table-column>
+        <el-table-column prop="createdAt" label="创建时间" width="180"></el-table-column>
+        <el-table-column prop="deadline" label="截止时间" width="180"></el-table-column>
+        <el-table-column prop="status" label="状态" width="120">
+          <template slot-scope="scope">
+            <el-select v-model="scope.row.status" placeholder="请选择状态" @change="updateTodoStatus(scope.row)">
+              <el-option label="待完成" value="pending"></el-option>
+              <el-option label="进行中" value="inProgress"></el-option>
+              <el-option label="已完成" value="completed"></el-option>
+              <el-option label="改进中" value="improving"></el-option>
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="进度" width="200">
+          <template slot-scope="scope">
+            <el-progress :percentage="getProgressPercentage(scope.row.status)" :status="getProgressStatus(scope.row.status)"></el-progress>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="200">
+          <template slot-scope="scope">
+            <el-button size="mini" @click="editTodo(scope.row)">编辑</el-button>
+            <el-button size="mini" type="danger" @click="deleteTodo(scope.row)">删除</el-button>
+            <el-button size="mini" type="primary" @click="showSubtasks(scope.row)">子任务</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-pagination
+        @size-change="handleSizeChange"
+        @current-change="handleCurrentChange"
+        :current-page="currentPage"
+        :page-sizes="[5, 10, 20, 50]"
+        :page-size="pageSize"
+        layout="total, sizes, prev, pager, next, jumper"
+        :total="totalTodos"
+      >
+      </el-pagination>
+    </div>
+
+    <div class="calendar-view">
+      <el-card class="box-card">
+        <div slot="header" class="clearfix">
+          <span>日历视图</span>
+          <el-radio-group v-model="calendarView" style="float: right;">
+            <el-radio-button label="month">月视图</el-radio-button>
+            <el-radio-button label="week">周视图</el-radio-button>
+          </el-radio-group>
+        </div>
+        <el-calendar v-if="calendarView === 'month'" v-model="calendarDate">
+          <template slot="dateCell" slot-scope="{date, data}">
+            <p :class="data.isSelected ? 'is-selected' : ''">
+              {{ data.day.split('-').slice(2).join('-') }}
+              {{ getTodoCountForDate(date) }}
+            </p>
+          </template>
+        </el-calendar>
+        <el-table v-else :data="getWeekViewData()" style="width: 100%">
+          <el-table-column v-for="day in weekDays" :key="day" :label="day" :prop="day">
+            <template slot-scope="scope">
+              <div v-for="todo in scope.row[day]" :key="todo.id">
+                <el-tag size="mini" :type="getTagType(todo.status)">{{ todo.title }}</el-tag>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+    </div>
+
+    <div class="statistics-view">
+      <el-card class="box-card">
+        <div slot="header" class="clearfix">
+          <span>任务完成状态统计</span>
+          <el-select v-model="statisticsType" style="float: right; width: 120px;">
+            <el-option label="柱状图" value="bar"></el-option>
+            <el-option label="折线图" value="line"></el-option>
+            <el-option label="饼图" value="pie"></el-option>
+          </el-select>
+          <el-date-picker
+            v-model="statisticsDate"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            style="float: right; margin-right: 10px;"
+            @change="updateStatistics"
+          >
+          </el-date-picker>
+        </div>
+        <div id="statisticsChart" style="width: 100%; height: 400px;"></div>
+      </el-card>
+    </div>
+
+    <div class="reminder-section">
+      <h2>待办提醒</h2>
+      <el-form :model="reminderForm" label-width="100px">
+        <el-form-item label="提醒名称">
+          <el-input v-model="reminderForm.name"></el-input>
+        </el-form-item>
+        <el-form-item label="提醒内容">
+          <el-input type="textarea" v-model="reminderForm.content"></el-input>
+        </el-form-item>
+        <el-form-item label="提醒时间">
+          <el-date-picker
+            v-model="reminderForm.time"
+            type="datetime"
+            placeholder="选择日期时间">
+          </el-date-picker>
+        </el-form-item>
+        <el-form-item label="重复提醒">
+          <el-switch v-model="reminderForm.repeat"></el-switch>
+        </el-form-item>
+        <el-form-item label="重复次数" v-if="reminderForm.repeat">
+          <el-input-number v-model="reminderForm.repeatTimes" :min="1"></el-input-number>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="setReminder">设置提醒</el-button>
+          <el-button @click="resetReminder">重置</el-button>
+        </el-form-item>
+      </el-form>
+      
+      <h3>提醒历史</h3>
+      <el-table :data="reminderHistory" style="width: 100%">
+        <el-table-column prop="name" label="名称" width="180"></el-table-column>
+        <el-table-column prop="content" label="内容"></el-table-column>
+        <el-table-column prop="time" label="提醒时间" width="180"></el-table-column>
+        <el-table-column label="操作" width="100">
+          <template slot-scope="scope">
+            <el-button size="mini" type="danger" @click="deleteReminderHistory(scope.$index)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- 添加/编辑待办事项对话框 -->
+    <el-dialog :title="dialogTitle" :visible.sync="todoDialogVisible">
+      <el-form :model="currentTodo" label-width="80px">
+        <el-form-item label="标题">
+          <el-input v-model="currentTodo.title"></el-input>
+        </el-form-item>
+        <el-form-item label="内容">
+          <el-input type="textarea" v-model="currentTodo.content"></el-input>
+        </el-form-item>
+        <el-form-item label="创建时间">
+          <el-date-picker v-model="currentTodo.createdAt" type="datetime" placeholder="选择日期时间"></el-date-picker>
+        </el-form-item>
+        <el-form-item label="截止时间">
+          <el-date-picker v-model="currentTodo.deadline" type="datetime" placeholder="选择日期时间"></el-date-picker>
+        </el-form-item>
+        <el-form-item label="标签">
+          <el-select v-model="currentTodo.tags" multiple placeholder="请选择标签">
+            <el-option label="工作" value="work"></el-option>
+            <el-option label="生活" value="life"></el-option>
+            <el-option label="学习" value="study"></el-option>
+            <el-option label="副业" value="sidejob"></el-option>
+            <el-option label="自定义" value="custom">
+              <el-input v-model="customTag" size="mini" style="width: 100px;" placeholder="输入自定义标签"></el-input>
+            </el-option>
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="todoDialogVisible = false">取 消</el-button>
+        <el-button type="primary" @click="saveTodo">确 定</el-button>
+      </div>
+    </el-dialog>
+
+    <!-- 子任务对话框 -->
+    <el-dialog title="子任务" :visible.sync="subtaskDialogVisible">
+      <el-button type="primary" @click="showAddSubtaskDialog">添加子任务</el-button>
+      <el-table :data="currentSubtasks" style="width: 100%; margin-top: 20px;">
+        <el-table-column prop="title" label="标题" width="180"></el-table-column>
+        <el-table-column prop="content" label="内容"></el-table-column>
+        <el-table-column prop="status" label="状态" width="120">
+          <template slot-scope="scope">
+            <el-select v-model="scope.row.status" placeholder="请选择状态" @change="updateSubtaskStatus(scope.row)">
+              <el-option label="待完成" value="pending"></el-option>
+              <el-option label="进行中" value="inProgress"></el-option>
+              <el-option label="已完成" value="completed"></el-option>
+              <el-option label="改进中" value="improving"></el-option>
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="进度" width="200">
+          <template slot-scope="scope">
+            <el-progress :percentage="getProgressPercentage(scope.row.status)" :status="getProgressStatus(scope.row.status)"></el-progress>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="200">
+          <template slot-scope="scope">
+            <el-button size="mini" @click="editSubtask(scope.row)">编辑</el-button>
+            <el-button size="mini" type="danger" @click="deleteSubtask(scope.row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <!-- 添加/编辑子任务对话框 -->
+    <el-dialog :title="subtaskDialogTitle" :visible.sync="subtaskEditDialogVisible">
+      <el-form :model="currentSubtask" label-width="80px">
+        <el-form-item label="标题">
+          <el-input v-model="currentSubtask.title"></el-input>
+        </el-form-item>
+        <el-form-item label="内容">
+          <el-input type="textarea" v-model="currentSubtask.content"></el-input>
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="subtaskEditDialogVisible = false">取 消</el-button>
+        <el-button type="primary" @click="saveSubtask">确 定</el-button>
+      </div>
+    </el-dialog>
+  </div>
+
+  <script>
+    new Vue({
+      el: '#app',
+      data() {
+        return {
+          todos: [],
+          filteredTodos: [],
+          currentPage: 1,
+          pageSize: 5,
+          totalTodos: 0,
+          searchQuery: '',
+          selectedTodos: [],
+          todoDialogVisible: false,
+          currentTodo: {},
+          dialogTitle: '',
+          subtaskDialogVisible: false,
+          currentSubtasks: [],
+          subtaskEditDialogVisible: false,
+          currentSubtask: {},
+          subtaskDialogTitle: '',
+          customTag: '',
+          calendarView: 'month',
+          calendarDate: new Date(),
+          weekDays: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+          statisticsType: 'bar',
+          statisticsDate: [],
+          reminderForm: {
+            name: '',
+            content: '',
+            time: '',
+            repeat: false,
+            repeatTimes: 1
+          },
+          reminderHistory: [],
+          announcements: [
+            "加油！你可以做到的！",
+            "每一个小进步都是巨大的胜利！",
+            "相信自己，你比想象中更强大！",
+            "今天的努力是明天的礼物！",
+            "保持积极的心态，成功就在眼前！"
+          ]
+        };
+      },
+      mounted() {
+        this.loadTodos();
+        this.initStatisticsChart();
+      },
+      methods: {
+        loadTodos() {
+          // 从localStorage加载待办事项
+          const storedTodos = localStorage.getItem('todos');
+          if (storedTodos) {
+            this.todos = JSON.parse(storedTodos);
+          }
+          this.updateFilteredTodos();
+        },
+        saveTodos() {
+          // 保存待办事项到localStorage
+          localStorage.setItem('todos', JSON.stringify(this.todos));
+        },
+        updateFilteredTodos() {
+          const start = (this.currentPage - 1) * this.pageSize;
+          const end = start + this.pageSize;
+          this.filteredTodos = this.todos.slice(start, end);
+          this.totalTodos = this.todos.length;
+        },
+        searchTodos() {
+          if (this.searchQuery) {
+            this.filteredTodos = this.todos.filter(todo => 
+              todo.title.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+              todo.content.toLowerCase().includes(this.searchQuery.toLowerCase())
+            );
+          } else {
+            this.updateFilteredTodos();
+          }
+        },
+        handleSelectionChange(val) {
+          this.selectedTodos = val;
+        },
+        showAddTodoDialog() {
+          this.currentTodo = {
+            title: '',
+            content: '',
+            createdAt: new Date(),
+            deadline: '',
+            status: 'pending',
+            tags: []
+          };
+          this.dialogTitle = '添加待办事项';
+          this.todoDialogVisible = true;
+        },
+        editTodo(todo) {
+          this.currentTodo = JSON.parse(JSON.stringify(todo));
+          this.dialogTitle = '编辑待办事项';
+          this.todoDialogVisible = true;
+        },
+        saveTodo() {
+          if (this.currentTodo.id) {
+            // 更新现有待办事项
+            const index = this.todos.findIndex(t => t.id === this.currentTodo.id);
+            this.todos.splice(index, 1, this.currentTodo);
+          } else {
+            // 添加新待办事项
+            this.currentTodo.id = Date.now();
+            this.todos.push(this.currentTodo);
+          }
+          this.saveTodos();
+          this.updateFilteredTodos();
+          this.todoDialogVisible = false;
+        },
+        deleteTodo(todo) {
+          this.$confirm('确认删除该待办事项吗？', '提示', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }).then(() => {
+            const index = this.todos.findIndex(t => t.id === todo.id);
+            this.todos.splice(index, 1);
+            this.saveTodos();
+            this.updateFilteredTodos();
+            this.$message({
+              type: 'success',
+              message: '删除成功!'
+            });
+          }).catch(() => {
+            this.$message({
+              type: 'info',
+              message: '已取消删除'
+            });          
+          });
+        },
+        batchDeleteTodos() {
+          this.$confirm(`确认删除选中的 ${this.selectedTodos.length} 个待办事项吗？`, '提示', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }).then(() => {
+            const selectedIds = this.selectedTodos.map(t => t.id);
+            this.todos = this.todos.filter(t => !selectedIds.includes(t.id));
+            this.saveTodos();
+            this.updateFilteredTodos();
+            this.$message({
+              type: 'success',
+              message: '批量删除成功!'
+            });
+          }).catch(() => {
+            this.$message({
+              type: 'info',
+              message: '已取消批量删除'
+            });
+          });
+        },
+        updateTodoStatus(todo) {
+          const index = this.todos.findIndex(t => t.id === todo.id);
+          this.todos[index].status = todo.status;
+          this.saveTodos();
+        },
+        getProgressPercentage(status) {
+          switch (status) {
+            case 'pending': return 0;
+            case 'inProgress': return 50;
+            case 'improving': return 75;
+            case 'completed': return 100;
+            default: return 0;
+          }
+        },
+        getProgressStatus(status) {
+          switch (status) {
+            case 'pending': return 'exception';
+            case 'inProgress': return 'warning';
+            case 'improving': return '';
+            case 'completed': return 'success';
+            default: return '';
+          }
+        },
+        showSubtasks(todo) {
+          this.currentSubtasks = todo.subtasks || [];
+          this.subtaskDialogVisible = true;
+        },
+        showAddSubtaskDialog() {
+          this.currentSubtask = {
+            title: '',
+            content: '',
+            status: 'pending'
+          };
+          this.subtaskDialogTitle = '添加子任务';
+          this.subtaskEditDialogVisible = true;
+        },
+        editSubtask(subtask) {
+          this.currentSubtask = JSON.parse(JSON.stringify(subtask));
+          this.subtaskDialogTitle = '编辑子任务';
+          this.subtaskEditDialogVisible = true;
+        },
+        saveSubtask() {
+          if (this.currentSubtask.id) {
+            // 更新现有子任务
+            const index = this.currentSubtasks.findIndex(s => s.id === this.currentSubtask.id);
+            this.currentSubtasks.splice(index, 1, this.currentSubtask);
+          } else {
+            // 添加新子任务
+            this.currentSubtask.id = Date.now();
+            this.currentSubtasks.push(this.currentSubtask);
+          }
+          this.updateTodoSubtasks();
+          this.subtaskEditDialogVisible = false;
+        },
+        deleteSubtask(subtask) {
+          this.$confirm('确认删除该子任务吗？', '提示', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }).then(() => {
+            const index = this.currentSubtasks.findIndex(s => s.id === subtask.id);
+            this.currentSubtasks.splice(index, 1);
+            this.updateTodoSubtasks();
+            this.$message({
+              type: 'success',
+              message: '删除子任务成功!'
+            });
+          }).catch(() => {
+            this.$message({
+              type: 'info',
+              message: '已取消删除子任务'
+            });
+          });
+        },
+        updateTodoSubtasks() {
+          const todoIndex = this.todos.findIndex(t => t.subtasks === this.currentSubtasks);
+          if (todoIndex !== -1) {
+            this.todos[todoIndex].subtasks = this.currentSubtasks;
+            this.saveTodos();
+          }
+        },
+        updateSubtaskStatus(subtask) {
+          const index = this.currentSubtasks.findIndex(s => s.id === subtask.id);
+          this.currentSubtasks[index].status = subtask.status;
+          this.updateTodoSubtasks();
+        },
+        handleSizeChange(val) {
+          this.pageSize = val;
+          this.updateFilteredTodos();
+        },
+        handleCurrentChange(val) {
+          this.currentPage = val;
+          this.updateFilteredTodos();
+        },
+        exportToMarkdown() {
+          let markdown = "# 待办事项列表\n\n";
+          this.todos.forEach((todo, index) => {
+            markdown += `## ${index + 1}. ${todo.title}\n\n`;
+            markdown += `- 内容: ${todo.content}\n`;
+            markdown += `- 创建时间: ${todo.createdAt}\n`;
+            markdown += `- 截止时间: ${todo.deadline}\n`;
+            markdown += `- 状态: ${todo.status}\n`;
+            markdown += `- 标签: ${todo.tags.join(', ')}\n\n`;
+            if (todo.subtasks && todo.subtasks.length > 0) {
+              markdown += "### 子任务:\n\n";
+              todo.subtasks.forEach((subtask, subIndex) => {
+                markdown += `${subIndex + 1}. ${subtask.title}\n`;
+                markdown += `   - 内容: ${subtask.content}\n`;
+                markdown += `   - 状态: ${subtask.status}\n\n`;
+              });
+            }
+            markdown += "---\n\n";
+          });
+          
+          const blob = new Blob([markdown], { type: 'text/markdown' });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = 'todos.md';
+          link.click();
+        },
+        importFromExcel() {
+          // 这里应该实现从Excel导入的逻辑
+          // 由于浏览器环境限制，我们无法直接读取Excel文件
+          // 通常这需要后端支持或使用特定的JavaScript库
+          this.$message({
+            type: 'warning',
+            message: '从Excel导入功能需要后端支持，暂未实现'
+          });
+        },
+        getTodoCountForDate(date) {
+          const formattedDate = this.formatDate(date);
+          const count = this.todos.filter(todo => this.formatDate(new Date(todo.createdAt)) === formattedDate).length;
+          return count > 0 ? `(${count})` : '';
+        },
+        formatDate(date) {
+          const d = new Date(date);
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        },
+        getWeekViewData() {
+          const startOfWeek = new Date(this.calendarDate);
+          startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
+          const weekData = {};
+          this.weekDays.forEach(day => {
+            weekData[day] = [];
+          });
+          for (let i = 0; i < 7; i++) {
+            const currentDate = new Date(startOfWeek);
+            currentDate.setDate(currentDate.getDate() + i);
+            const formattedDate = this.formatDate(currentDate);
+            const dayTodos = this.todos.filter(todo => this.formatDate(new Date(todo.createdAt)) === formattedDate);
+            weekData[this.weekDays[i]] = dayTodos;
+          }
+          return [weekData];
+        },
+        getTagType(status) {
+          switch (status) {
+            case 'pending': return '';
+            case 'inProgress': return 'warning';
+            case 'completed': return 'success';
+            case 'improving': return 'info';
+            default: return '';
+          }
+        },
+        initStatisticsChart() {
+          this.statisticsChart = echarts.init(document.getElementById('statisticsChart'));
+          this.updateStatistics();
+        },
+        updateStatistics() {
+          let data;
+          if (this.statisticsType === 'pie') {
+            data = this.getPieChartData();
+          } else {
+            data = this.getBarLineChartData();
+          }
+          
+          const option = {
+            title: {
+              text: '任务完成状态统计'
+            },
+            tooltip: {},
+            legend: {
+              data: ['待完成', '进行中', '已完成', '改进中']
+            },
+            xAxis: this.statisticsType === 'pie' ? {} : {
+              data: data.dates
+            },
+            yAxis: this.statisticsType === 'pie' ? {} : {},
+            series: [{
+              name: '任务状态',
+              type: this.statisticsType,
+              data: this.statisticsType === 'pie' ? data : [
+                {name: '待完成', data: data.pending},
+                {name: '进行中', data: data.inProgress},
+                {name: '已完成', data: data.completed},
+                {name: '改进中', data: data.improving}
+              ]
+            }]
+          };
+          
+          this.statisticsChart.setOption(option);
+        },
+        getPieChartData() {
+          const statusCounts = {
+            pending: 0,
+            inProgress: 0,
+            completed: 0,
+            improving: 0
+          };
+          
+          this.todos.forEach(todo => {
+            statusCounts[todo.status]++;
+          });
+          
+          return [
+            {value: statusCounts.pending, name: '待完成'},
+            {value: statusCounts.inProgress, name: '进行中'},
+            {value: statusCounts.completed, name: '已完成'},
+            {value: statusCounts.improving, name: '改进中'}
+          ];
+        },
+        getBarLineChartData() {
+          const data = {
+            dates: [],
+            pending: [],
+            inProgress: [],
+            completed: [],
+            improving: []
+          };
+          
+          // 假设statisticsDate包含开始和结束日期
+          const startDate = this.statisticsDate[0];
+          const endDate = this.statisticsDate[1];
+          
+          for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            const formattedDate = this.formatDate(d);
+            data.dates.push(formattedDate);
+            const todosForDate = this.todos.filter(todo => this.formatDate(new Date(todo.createdAt)) === formattedDate);
+            data.pending.push(todosForDate.filter(todo => todo.status === 'pending').length);
+            data.inProgress.push(todosForDate.filter(todo => todo.status === 'inProgress').length);
+            data.completed.push(todosForDate.filter(todo => todo.status === 'completed').length);
+            data.improving.push(todosForDate.filter(todo => todo.status === 'improving').length);
+          }
+          
+          return data;
+        },
+        setReminder() {
+          if (!this.reminderForm.name || !this.reminderForm.content || !this.reminderForm.time) {
+            this.$message.error('请填写完整的提醒信息');
+            return;
+          }
+
+          const now = new Date();
+          const reminderTime = new Date(this.reminderForm.time);
+
+          if (reminderTime <= now) {
+            this.$message.error('提醒时间必须大于当前时间');
+            return;
+          }
+
+          const reminder = {
+            ...this.reminderForm,
+            id: Date.now()
+          };
+
+          // 设置提醒
+          const timeoutId = setTimeout(() => {
+            this.showReminderNotification(reminder);
+            if (reminder.repeat && reminder.repeatTimes > 1) {
+              let repeatCount = 1;
+              const intervalId = setInterval(() => {
+                this.showReminderNotification(reminder);
+                repeatCount++;
+                if (repeatCount >= reminder.repeatTimes) {
+                  clearInterval(intervalId);
+                }
+              }, 60000); // 每分钟重复一次
+            }
+          }, reminderTime - now);
+
+          // 保存提醒到历史记录
+          this.reminderHistory.push(reminder);
+          localStorage.setItem('reminderHistory', JSON.stringify(this.reminderHistory));
+
+          this.$message.success('提醒已设置');
+          this.resetReminder();
+        },
+        showReminderNotification(reminder) {
+          if ('Notification' in window) {
+            Notification.requestPermission().then(permission => {
+              if (permission === 'granted') {
+                new Notification(reminder.name, {
+                  body: reminder.content,
+                  icon: 'path/to/icon.png' // 替换为实际的图标路径
+                });
+              }
+            });
+          }
+
+          // 同时在页面上显示提醒
+          this.$notify({
+            title: reminder.name,
+            message: reminder.content,
+            duration: 0,
+            type: 'warning'
+          });
+        },
+        resetReminder() {
+          this.reminderForm = {
+            name: '',
+            content: '',
+            time: '',
+            repeat: false,
+            repeatTimes: 1
+          };
+        },
+        deleteReminderHistory(index) {
+          this.reminderHistory.splice(index, 1);
+          localStorage.setItem('reminderHistory', JSON.stringify(this.reminderHistory));
+        }
+      },
+      created() {
+        // 加载提醒历史记录
+        const storedReminderHistory = localStorage.getItem('reminderHistory');
+        if (storedReminderHistory) {
+          this.reminderHistory = JSON.parse(storedReminderHistory);
+        }
+      }
+    });
+  </script>
+</body>
+</html>
