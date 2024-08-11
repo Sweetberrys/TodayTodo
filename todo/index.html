@@ -1,48 +1,49 @@
-<html>
-  <head>
-  <base href="https://websim.co/zh-CN/todo-app/">
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TodayTodo - 待办事项与提醒</title>
-  <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/element-ui@2.15.9/lib/index.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.17.0/dist/xlsx.full.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-ui@2.15.9/lib/theme-chalk/index.css">
+<html><head><base href="https://websim.co/zh-CN/todo-app/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任务管理 - 待办事项与提醒</title>
+<script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/element-ui@2.15.9/lib/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.17.0/dist/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-ui@2.15.9/lib/theme-chalk/index.css">
 <style>
   body {
-
+    font-family: 'Microsoft YaHei', '微软雅黑', sans-serif;
+    background-color: palevioletred;
+    margin: 0;
+    padding: 0;
   }
-  #yslapp {
+  #app {
     max-width: 1200px;
     margin: 0 auto;
     padding: 20px;
   }
-  .ysltask-list {
+  .task-list {
     background-color: white;
     border-radius: 4px;
     box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
     padding: 20px;
     margin-bottom: 20px;
   }
-  .ysltask-item {
+  .task-item {
     border-bottom: 1px solid #ebeef5;
     padding: 10px 0;
   }
-  .ysltask-item:last-child {
+  .task-item:last-child {
     border-bottom: none;
   }
-  .yslprogress-bar {
+  .progress-bar {
     height: 5px;
     border-radius: 2px;
     margin-top: 5px;
   }
-  .yslcalendar-view {
+  .calendar-view {
     background-color: white;
     border-radius: 4px;
     box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
     padding: 20px;
   }
-  .yslreminder-popup {
+  .reminder-popup {
     position: fixed;
     bottom: 20px;
     right: 20px;
@@ -63,7 +64,7 @@
 </style>
 </head>
 <body>
-<div id="yslapp">
+<div id="app">
   <el-container>
     <el-header>
       <h1>任务管理系统</h1>
@@ -71,7 +72,7 @@
     <el-main>
       <el-tabs v-model="activeTab">
         <el-tab-pane label="待办任务" name="tasks">
-          <div class="ysltask-list">
+          <div class="task-list">
             <el-row>
               <el-col :span="24">
                 <el-button type="primary" @click="showAddTaskDialog">添加任务</el-button>
@@ -111,7 +112,7 @@
                 </el-input>
               </el-col>
             </el-row>
-            <el-row v-for="task in filteredTasks" :key="task.id" class="ysltask-item">
+            <el-row v-for="task in filteredTasks" :key="task.id" class="task-item">
               <el-col :span="24">
                 <el-checkbox v-model="task.completed" @change="updateTaskStatus(task)"></el-checkbox>
                 <span @click="editTask(task)">{{ task.title }}</span>
@@ -126,13 +127,13 @@
                     <el-dropdown-item command="addSubtask">添加子任务</el-dropdown-item>
                   </el-dropdown-menu>
                 </el-dropdown>
-                <div class="yslprogress-bar" :style="{ backgroundColor: getProgressColor(task.status), width: getProgressWidth(task) }"></div>
+                <div class="progress-bar" :style="{ backgroundColor: getProgressColor(task.status), width: getProgressWidth(task) }"></div>
               </el-col>
             </el-row>
           </div>
         </el-tab-pane>
         <el-tab-pane label="日历视图" name="calendar">
-          <div class="yslcalendar-view">
+          <div class="calendar-view">
             <el-calendar v-model="calendarDate">
               <template slot="dateCell" slot-scope="{date, data}">
                 <div>
@@ -239,7 +240,7 @@
         </span>
       </el-dialog>
 
-      <div v-if="activeReminder" class="yslreminder-popup">
+      <div v-if="activeReminder" class="reminder-popup">
         <h3>{{ activeReminder.name }}</h3>
         <p>{{ activeReminder.content }}</p>
         <el-button size="mini" @click="dismissReminder">关闭</el-button>
@@ -250,7 +251,7 @@
 
 <script>
 new Vue({
-  el: '#yslapp',
+  el: '#app',
   data: {
     activeTab: 'tasks',
     tasks: [],
