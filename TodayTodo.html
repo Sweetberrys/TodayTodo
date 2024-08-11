@@ -1,0 +1,483 @@
+<html>
+  <head>
+  <base href="https://websim.co/zh-CN/todo-app/">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TodayTodo - 待办事项与提醒</title>
+  <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/element-ui@2.15.9/lib/index.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.17.0/dist/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-ui@2.15.9/lib/theme-chalk/index.css">
+<style>
+  body {
+
+  }
+  #yslapp {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .ysltask-list {
+    background-color: white;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .ysltask-item {
+    border-bottom: 1px solid #ebeef5;
+    padding: 10px 0;
+  }
+  .ysltask-item:last-child {
+    border-bottom: none;
+  }
+  .yslprogress-bar {
+    height: 5px;
+    border-radius: 2px;
+    margin-top: 5px;
+  }
+  .yslcalendar-view {
+    background-color: white;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+    padding: 20px;
+  }
+  .yslreminder-popup {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: white;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+    padding: 15px;
+    z-index: 9999;
+    animation: vibrate 0.3s linear infinite;
+  }
+  @keyframes vibrate {
+    0% { transform: translate(0); }
+    25% { transform: translate(2px, 2px); }
+    50% { transform: translate(0); }
+    75% { transform: translate(-2px, -2px); }
+    100% { transform: translate(0); }
+  }
+</style>
+</head>
+<body>
+<div id="yslapp">
+  <el-container>
+    <el-header>
+      <h1>任务管理系统</h1>
+    </el-header>
+    <el-main>
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="待办任务" name="tasks">
+          <div class="ysltask-list">
+            <el-row>
+              <el-col :span="24">
+                <el-button type="primary" @click="showAddTaskDialog">添加任务</el-button>
+                <el-button type="success" @click="exportTasks">导出任务</el-button>
+                <el-upload
+                  action="#"
+                  :before-upload="handleImport"
+                  accept=".xlsx, .xls"
+                  :show-file-list="false">
+                  <el-button type="warning">导入任务</el-button>
+                </el-upload>
+              </el-col>
+            </el-row>
+            <el-row style="margin-top: 20px;">
+              <el-col :span="24">
+                <el-select v-model="taskStatusFilter" placeholder="任务状态" style="margin-right: 10px;">
+                  <el-option
+                    v-for="item in taskStatusOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value">
+                  </el-option>
+                </el-select>
+                <el-select v-model="taskLabelFilter" placeholder="任务标签" style="margin-right: 10px;">
+                  <el-option
+                    v-for="item in taskLabelOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value">
+                  </el-option>
+                </el-select>
+                <el-input
+                  v-if="taskLabelFilter === 'custom'"
+                  v-model="customLabelFilter"
+                  placeholder="自定义标签"
+                  style="width: 200px;">
+                </el-input>
+              </el-col>
+            </el-row>
+            <el-row v-for="task in filteredTasks" :key="task.id" class="ysltask-item">
+              <el-col :span="24">
+                <el-checkbox v-model="task.completed" @change="updateTaskStatus(task)"></el-checkbox>
+                <span @click="editTask(task)">{{ task.title }}</span>
+                <el-tag size="mini" :type="getTagType(task.label)">{{ task.label }}</el-tag>
+                <el-dropdown style="float: right;" @command="handleCommand($event, task)">
+                  <span class="el-dropdown-link">
+                    操作<i class="el-icon-arrow-down el-icon--right"></i>
+                  </span>
+                  <el-dropdown-menu slot="dropdown">
+                    <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                    <el-dropdown-item command="delete">删除</el-dropdown-item>
+                    <el-dropdown-item command="addSubtask">添加子任务</el-dropdown-item>
+                  </el-dropdown-menu>
+                </el-dropdown>
+                <div class="yslprogress-bar" :style="{ backgroundColor: getProgressColor(task.status), width: getProgressWidth(task) }"></div>
+              </el-col>
+            </el-row>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="日历视图" name="calendar">
+          <div class="yslcalendar-view">
+            <el-calendar v-model="calendarDate">
+              <template slot="dateCell" slot-scope="{date, data}">
+                <div>
+                  {{ data.day.split('-').slice(-1)[0] }}
+                  <el-popover
+                    placement="right"
+                    width="300"
+                    trigger="hover">
+                    <div v-for="task in getTasksForDate(date)" :key="task.id">
+                      <p>{{ task.title }}</p>
+                      <p>{{ task.content }}</p>
+                    </div>
+                    <div slot="reference" class="task-indicator" v-if="getTasksForDate(date).length">
+                      {{ getTasksForDate(date).length }} 个任务
+                    </div>
+                  </el-popover>
+                </div>
+              </template>
+            </el-calendar>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="待办提醒" name="reminders">
+          <div class="reminder-list">
+            <el-button type="primary" @click="showAddReminderDialog">添加提醒</el-button>
+            <el-table :data="reminders" style="width: 100%; margin-top: 20px;">
+              <el-table-column prop="name" label="名称"></el-table-column>
+              <el-table-column prop="content" label="内容"></el-table-column>
+              <el-table-column prop="duration" label="提醒时间"></el-table-column>
+              <el-table-column label="操作">
+                <template slot-scope="scope">
+                  <el-button size="mini" @click="pauseReminder(scope.row)">暂停</el-button>
+                  <el-button size="mini" type="danger" @click="resetReminder(scope.row)">重置</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+
+      <el-dialog title="添加/编辑任务" :visible.sync="taskDialogVisible">
+        <el-form :model="currentTask" label-width="80px">
+          <el-form-item label="标题">
+            <el-input v-model="currentTask.title"></el-input>
+          </el-form-item>
+          <el-form-item label="内容">
+            <el-input type="textarea" v-model="currentTask.content"></el-input>
+          </el-form-item>
+          <el-form-item label="创建时间">
+            <el-date-picker
+              v-model="currentTask.createdAt"
+              type="datetime"
+              placeholder="选择日期时间">
+            </el-date-picker>
+          </el-form-item>
+          <el-form-item label="状态">
+            <el-select v-model="currentTask.status">
+              <el-option label="待完成" value="pending"></el-option>
+              <el-option label="进行中" value="inProgress"></el-option>
+              <el-option label="改进中" value="improving"></el-option>
+              <el-option label="已完成" value="completed"></el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="标签">
+            <el-select v-model="currentTask.label">
+              <el-option label="工作" value="work"></el-option>
+              <el-option label="生活" value="life"></el-option>
+              <el-option label="学习" value="study"></el-option>
+              <el-option label="副业" value="side"></el-option>
+              <el-option label="自定义" value="custom"></el-option>
+            </el-select>
+            <el-input
+              v-if="currentTask.label === 'custom'"
+              v-model="currentTask.customLabel"
+              placeholder="请输入自定义标签"
+              style="width: 200px; margin-left: 10px;">
+            </el-input>
+          </el-form-item>
+        </el-form>
+        <span slot="footer" class="dialog-footer">
+          <el-button @click="taskDialogVisible = false">取 消</el-button>
+          <el-button type="primary" @click="saveTask">确 定</el-button>
+        </span>
+      </el-dialog>
+
+      <el-dialog title="添加提醒" :visible.sync="reminderDialogVisible">
+        <el-form :model="currentReminder" label-width="80px">
+          <el-form-item label="名称">
+            <el-input v-model="currentReminder.name"></el-input>
+          </el-form-item>
+          <el-form-item label="内容">
+            <el-input type="textarea" v-model="currentReminder.content"></el-input>
+          </el-form-item>
+          <el-form-item label="提醒时间">
+            <el-input-number v-model="currentReminder.duration" :min="1" :max="60"></el-input-number>
+            <el-select v-model="currentReminder.durationUnit" style="margin-left: 10px;">
+              <el-option label="分钟" value="minutes"></el-option>
+              <el-option label="小时" value="hours"></el-option>
+            </el-select>
+          </el-form-item>
+        </el-form>
+        <span slot="footer" class="dialog-footer">
+          <el-button @click="reminderDialogVisible = false">取 消</el-button>
+          <el-button type="primary" @click="saveReminder">确 定</el-button>
+        </span>
+      </el-dialog>
+
+      <div v-if="activeReminder" class="yslreminder-popup">
+        <h3>{{ activeReminder.name }}</h3>
+        <p>{{ activeReminder.content }}</p>
+        <el-button size="mini" @click="dismissReminder">关闭</el-button>
+      </div>
+    </el-main>
+  </el-container>
+</div>
+
+<script>
+new Vue({
+  el: '#yslapp',
+  data: {
+    activeTab: 'tasks',
+    tasks: [],
+    reminders: [],
+    taskDialogVisible: false,
+    reminderDialogVisible: false,
+    currentTask: {},
+    currentReminder: {},
+    taskStatusFilter: '',
+    taskLabelFilter: '',
+    customLabelFilter: '',
+    calendarDate: new Date(),
+    activeReminder: null,
+    taskStatusOptions: [
+      { value: '', label: '全部' },
+      { value: 'pending', label: '待完成' },
+      { value: 'inProgress', label: '进行中' },
+      { value: 'improving', label: '改进中' },
+      { value: 'completed', label: '已完成' }
+    ],
+    taskLabelOptions: [
+      { value: '', label: '全部' },
+      { value: 'work', label: '工作' },
+      { value: 'life', label: '生活' },
+      { value: 'study', label: '学习' },
+      { value: 'side', label: '副业' },
+      { value: 'custom', label: '自定义' }
+    ]
+  },
+  computed: {
+    filteredTasks() {
+      return this.tasks.filter(task => {
+        const statusMatch = !this.taskStatusFilter || task.status === this.taskStatusFilter;
+        let labelMatch = !this.taskLabelFilter || task.label === this.taskLabelFilter;
+        if (this.taskLabelFilter === 'custom' && this.customLabelFilter) {
+          labelMatch = task.customLabel === this.customLabelFilter;
+        }
+        return statusMatch && labelMatch;
+      });
+    }
+  },
+  methods: {
+    showAddTaskDialog() {
+      this.currentTask = {
+        id: Date.now(),
+        title: '',
+        content: '',
+        createdAt: new Date(),
+        status: 'pending',
+        label: 'work',
+        customLabel: '',
+        completed: false
+      };
+      this.taskDialogVisible = true;
+    },
+    editTask(task) {
+      this.currentTask = { ...task };
+      this.taskDialogVisible = true;
+    },
+    saveTask() {
+      const index = this.tasks.findIndex(t => t.id === this.currentTask.id);
+      if (index > -1) {
+        this.$set(this.tasks, index, this.currentTask);
+      } else {
+        this.tasks.push(this.currentTask);
+      }
+      this.taskDialogVisible = false;
+      this.saveTasks();
+    },
+    updateTaskStatus(task) {
+      task.status = task.completed ? 'completed' : 'pending';
+      this.saveTasks();
+    },
+    deleteTask(task) {
+      const index = this.tasks.findIndex(t => t.id === task.id);
+      if (index > -1) {
+        this.tasks.splice(index, 1);
+        this.saveTasks();
+      }
+    },
+    addSubtask(parentTask) {
+      const subtask = {
+        id: Date.now(),
+        title: `子任务 ${parentTask.subtasks ? parentTask.subtasks.length + 1 : 1}`,
+        content: '',
+        createdAt: new Date(),
+        status: 'pending',
+        label: parentTask.label,
+        customLabel: parentTask.customLabel,
+        completed: false,
+        parentId: parentTask.id
+      };
+      if (!parentTask.subtasks) {
+        this.$set(parentTask, 'subtasks', []);
+      }
+      parentTask.subtasks.push(subtask);
+      this.saveTasks();
+    },
+    exportTasks() {
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(this.tasks);
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Tasks");
+      XLSX.writeFile(workbook, "tasks.xlsx");
+    },
+    handleImport(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const importedTasks = XLSX.utils.sheet_to_json(worksheet);
+        this.tasks = [...this.tasks, ...importedTasks];
+        this.saveTasks();
+      };
+      reader.readAsArrayBuffer(file);
+      return false;
+    },
+    getProgressColor(status) {
+      const colors = {
+        pending: '#f56c6c',
+        inProgress: '#e6a23c',
+        improving: '#f39c12',
+        completed: '#67c23a'
+      };
+      return colors[status] || '#909399';
+    },
+    getProgressWidth(task) {
+      if (task.status === 'completed') return '100%';
+      if (task.status === 'improving') return '75%';
+      if (task.status === 'inProgress') return '50%';
+      return '25%';
+    },
+    getTagType(label) {
+      const types = {
+        work: '',
+        life: 'success',
+        study: 'info',
+        side: 'warning'
+      };
+      return types[label] || 'danger';
+    },
+    getTasksForDate(date) {
+      return this.tasks.filter(task => {
+        const taskDate = new Date(task.createdAt);
+        return taskDate.toDateString() === date.toDateString();
+      });
+    },
+    showAddReminderDialog() {
+      this.currentReminder = {
+        id: Date.now(),
+        name: '',
+        content: '',
+        duration: 5,
+        durationUnit: 'minutes'
+      };
+      this.reminderDialogVisible = true;
+    },
+    saveReminder() {
+      const reminder = { ...this.currentReminder };
+      reminder.timeoutId = setTimeout(() => {
+        this.showReminder(reminder);
+      }, this.getReminderDuration(reminder));
+      this.reminders.push(reminder);
+      this.reminderDialogVisible = false;
+      this.saveReminders();
+    },
+    getReminderDuration(reminder) {
+      return reminder.duration * (reminder.durationUnit === 'minutes' ? 60000 : 3600000);
+    },
+    showReminder(reminder) {
+      this.activeReminder = reminder;
+    },
+    dismissReminder() {
+      this.activeReminder = null;
+    },
+    pauseReminder(reminder) {
+      clearTimeout(reminder.timeoutId);
+    },
+    resetReminder(reminder) {
+      clearTimeout(reminder.timeoutId);
+      reminder.timeoutId = setTimeout(() => {
+        this.showReminder(reminder);
+      }, this.getReminderDuration(reminder));
+    },
+    handleCommand(command, task) {
+      switch (command) {
+        case 'edit':
+          this.editTask(task);
+          break;
+        case 'delete':
+          this.deleteTask(task);
+          break;
+        case 'addSubtask':
+          this.addSubtask(task);
+          break;
+      }
+    },
+    saveTasks() {
+      localStorage.setItem('tasks', JSON.stringify(this.tasks));
+    },
+    saveReminders() {
+      localStorage.setItem('reminders', JSON.stringify(this.reminders));
+    },
+    loadTasks() {
+      const savedTasks = localStorage.getItem('tasks');
+      if (savedTasks) {
+        this.tasks = JSON.parse(savedTasks);
+      }
+    },
+    loadReminders() {
+      const savedReminders = localStorage.getItem('reminders');
+      if (savedReminders) {
+        this.reminders = JSON.parse(savedReminders);
+        this.reminders.forEach(reminder => {
+          reminder.timeoutId = setTimeout(() => {
+            this.showReminder(reminder);
+          }, this.getReminderDuration(reminder));
+        });
+      }
+    }
+  },
+  created() {
+    this.loadTasks();
+    this.loadReminders();
+  }
+});
+</script>
+</body>
+</html>
