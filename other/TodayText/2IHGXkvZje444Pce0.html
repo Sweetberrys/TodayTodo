@@ -1,0 +1,453 @@
+<html><head><base href="https://websim.creation/todaytext/" />
+<meta charset="utf-8">
+<title>TodayText - 您的智能笔记助手</title>
+<link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+<script src="https://unpkg.com/vue@2.6.14/dist/vue.js"></script>
+<script src="https://unpkg.com/element-ui/lib/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/wangeditor@latest/dist/wangEditor.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  body {
+    font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f0f2f5;
+  }
+  #app {
+    display: flex;
+    height: 100vh;
+  }
+  .sidebar {
+    width: 250px;
+    background-color: #fff;
+    border-right: 1px solid #e6e6e6;
+    padding: 20px;
+    overflow-y: auto;
+  }
+  .main-content {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+  }
+  .note-card {
+    background-color: #fff;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px 0 rgba(0,0,0,.1);
+    margin-bottom: 20px;
+    padding: 15px;
+  }
+  .note-title {
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+  .note-content {
+    font-size: 14px;
+    color: #606266;
+  }
+  .folder-item {
+    cursor: pointer;
+    padding: 5px 0;
+  }
+  .folder-item:hover {
+    background-color: #f5f7fa;
+  }
+  .trash-can {
+    margin-top: 20px;
+    border-top: 1px solid #e6e6e6;
+    padding-top: 10px;
+  }
+  .editor-container {
+    border: 1px solid #ccc;
+    z-index: 100;
+  }
+  .toolbar {
+    border-bottom: 1px solid #ccc;
+  }
+  .text-container {
+    height: 400px;
+    overflow-y: auto;
+  }
+</style>
+</head>
+<body>
+  <div id="app">
+    <div class="sidebar">
+      <el-input
+        placeholder="搜索笔记"
+        v-model="searchQuery"
+        @input="searchNotes"
+        prefix-icon="el-icon-search">
+      </el-input>
+      <el-tree
+        :data="folders"
+        :props="defaultProps"
+        @node-click="handleNodeClick"
+        draggable
+        :allow-drop="allowDrop"
+        :allow-drag="allowDrag"
+        @node-drag-end="handleDragEnd">
+      </el-tree>
+      <el-button @click="createFolder" type="text" icon="el-icon-plus">新建文件夹</el-button>
+      <div class="trash-can">
+        <el-button @click="showTrash" type="text" icon="el-icon-delete">回收站</el-button>
+      </div>
+    </div>
+    <div class="main-content">
+      <el-button @click="createNote" type="primary" icon="el-icon-plus">新建笔记</el-button>
+      <el-button @click="exportNotes" type="success" icon="el-icon-download">导出笔记</el-button>
+      <el-button @click="importNotes" type="warning" icon="el-icon-upload2">导入笔记</el-button>
+      <el-row :gutter="20">
+        <el-col :span="8" v-for="note in filteredNotes" :key="note.id">
+          <div class="note-card">
+            <div class="note-title">{{ note.title }}</div>
+            <div class="note-content" v-html="note.content.substring(0, 100) + '...'"></div>
+            <el-button-group>
+              <el-button @click="editNote(note)" size="mini" icon="el-icon-edit">编辑</el-button>
+              <el-button @click="deleteNote(note)" size="mini" type="danger" icon="el-icon-delete">删除</el-button>
+            </el-button-group>
+          </div>
+        </el-col>
+      </el-row>
+    </div>
+
+    <el-dialog title="编辑笔记" :visible.sync="dialogVisible" width="80%" :before-close="handleClose">
+      <el-form :model="currentNote">
+        <el-form-item label="标题">
+          <el-input v-model="currentNote.title"></el-input>
+        </el-form-item>
+        <el-form-item label="分类">
+          <el-select v-model="currentNote.category" placeholder="请选择分类">
+            <el-option
+              v-for="item in categories"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value">
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="标签">
+          <el-tag
+            :key="tag"
+            v-for="tag in currentNote.tags"
+            closable
+            :disable-transitions="false"
+            @close="handleClose(tag)">
+            {{tag}}
+          </el-tag>
+          <el-input
+            class="input-new-tag"
+            v-if="inputVisible"
+            v-model="inputValue"
+            ref="saveTagInput"
+            size="small"
+            @keyup.enter.native="handleInputConfirm"
+            @blur="handleInputConfirm"
+          >
+          </el-input>
+          <el-button v-else class="button-new-tag" size="small" @click="showInput">+ 新标签</el-button>
+        </el-form-item>
+        <el-form-item label="内容">
+          <div ref="editor" class="editor-container">
+            <div class="toolbar"></div>
+            <div class="text-container"></div>
+          </div>
+        </el-form-item>
+        <el-form-item>
+          <span>字数统计：{{ wordCount }}</span>
+        </el-form-item>
+      </el-form>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="dialogVisible = false">取 消</el-button>
+        <el-button type="primary" @click="saveNote">确 定</el-button>
+      </span>
+    </el-dialog>
+
+    <el-dialog title="回收站" :visible.sync="trashVisible" width="60%">
+      <el-table :data="trashedNotes">
+        <el-table-column prop="title" label="标题"></el-table-column>
+        <el-table-column label="操作">
+          <template slot-scope="scope">
+            <el-button @click="restoreNote(scope.row)" type="text" size="small">恢复</el-button>
+            <el-button @click="permanentlyDeleteNote(scope.row)" type="text" size="small">永久删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+  </div>
+
+  <script>
+    new Vue({
+      el: '#app',
+      data() {
+        return {
+          notes: [],
+          trashedNotes: [],
+          folders: [{
+            id: 1,
+            label: '我的笔记',
+            children: []
+          }],
+          defaultProps: {
+            children: 'children',
+            label: 'label'
+          },
+          dialogVisible: false,
+          currentNote: {
+            id: null,
+            title: '',
+            content: '',
+            category: '',
+            tags: []
+          },
+          categories: [
+            { value: 'work', label: '工作' },
+            { value: 'study', label: '学习' },
+            { value: 'life', label: '生活' }
+          ],
+          searchQuery: '',
+          editor: null,
+          wordCount: 0,
+          trashVisible: false,
+          inputVisible: false,
+          inputValue: ''
+        };
+      },
+      computed: {
+        filteredNotes() {
+          if (this.searchQuery) {
+            return this.notes.filter(note => 
+              note.title.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+              note.content.toLowerCase().includes(this.searchQuery.toLowerCase())
+            );
+          }
+          return this.notes;
+        }
+      },
+      mounted() {
+        this.loadNotes();
+        this.loadTrashedNotes();
+      },
+      methods: {
+        createNote() {
+          this.currentNote = {
+            id: Date.now(),
+            title: '',
+            content: '',
+            category: '',
+            tags: []
+          };
+          this.dialogVisible = true;
+          this.$nextTick(() => {
+            this.initEditor();
+          });
+        },
+        editNote(note) {
+          this.currentNote = JSON.parse(JSON.stringify(note));
+          this.dialogVisible = true;
+          this.$nextTick(() => {
+            this.initEditor();
+            this.editor.txt.html(this.currentNote.content);
+          });
+        },
+        deleteNote(note) {
+          this.$confirm('此操作将把笔记移至回收站, 是否继续?', '提示', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }).then(() => {
+            const index = this.notes.findIndex(n => n.id === note.id);
+            if (index !== -1) {
+              const deletedNote = this.notes.splice(index, 1)[0];
+              this.trashedNotes.push(deletedNote);
+              this.saveTrashedNotes();
+            }
+            this.saveNotes();
+            this.$message({
+              type: 'success',
+              message: '删除成功!'
+            });
+          }).catch(() => {
+            this.$message({
+              type: 'info',
+              message: '已取消删除'
+            });          
+          });
+        },
+        saveNote() {
+          this.currentNote.content = this.editor.txt.html();
+          const index = this.notes.findIndex(n => n.id === this.currentNote.id);
+          if (index !== -1) {
+            this.notes.splice(index, 1, this.currentNote);
+          } else {
+            this.notes.push(this.currentNote);
+          }
+          this.saveNotes();
+          this.dialogVisible = false;
+          this.$message({
+            message: '笔记保存成功',
+            type: 'success'
+          });
+        },
+        initEditor() {
+          const editor = new wangEditor(this.$refs.editor.querySelector('.toolbar'), this.$refs.editor.querySelector('.text-container'));
+          editor.config.onchange = (html) => {
+            this.wordCount = this.getWordCount(html);
+          };
+          editor.config.uploadImgShowBase64 = true;
+          editor.create();
+          this.editor = editor;
+        },
+        getWordCount(html) {
+          const text = html.replace(/<[^>]+>/g, '');
+          return text.length;
+        },
+        handleClose(tag) {
+          this.currentNote.tags.splice(this.currentNote.tags.indexOf(tag), 1);
+        },
+        showInput() {
+          this.inputVisible = true;
+          this.$nextTick(_ => {
+            this.$refs.saveTagInput.$refs.input.focus();
+          });
+        },
+        handleInputConfirm() {
+          let inputValue = this.inputValue;
+          if (inputValue) {
+            this.currentNote.tags.push(inputValue);
+          }
+          this.inputVisible = false;
+          this.inputValue = '';
+        },
+        exportNotes() {
+          const notesText = this.notes.map(note => {
+            return `# ${note.title}\n\n${marked.parse(note.content)}`;
+          }).join('\n\n---\n\n');
+          
+          const blob = new Blob([notesText], {type: 'text/markdown;charset=utf-8'});
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = 'exported_notes.md';
+          link.click();
+          URL.revokeObjectURL(url);
+        },
+        importNotes() {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = '.md';
+          input.onchange = e => {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = event => {
+              const content = event.target.result;
+              const notes = content.split('---').map(noteContent => {
+                const lines = noteContent.trim().split('\n');
+                const title = lines[0].replace('# ', '');
+                const content = lines.slice(2).join('\n');
+                return { id: Date.now(), title, content, category: '', tags: [] };
+              });
+              this.notes = this.notes.concat(notes);
+              this.saveNotes();
+              this.$message({
+                message: '笔记导入成功',
+                type: 'success'
+              });
+            };
+            reader.readAsText(file);
+          };
+          input.click();
+        },
+        createFolder() {
+          this.$prompt('请输入文件夹名称', '新建文件夹', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+          }).then(({ value }) => {
+            const newFolder = { id: Date.now(), label: value, children: [] };
+            this.folders[0].children.push(newFolder);
+            this.$message({
+              type: 'success',
+              message: '文件夹创建成功'
+            });
+          }).catch(() => {
+            this.$message({
+              type: 'info',
+              message: '取消创建'
+            });       
+          });
+        },
+        handleNodeClick(data) {
+          console.log(data);
+        },
+        allowDrop(draggingNode, dropNode, type) {
+          return dropNode.data.label === '我的笔记' || type !== 'inner';
+        },
+        allowDrag(draggingNode) {
+          return draggingNode.data.label !== '我的笔记';
+        },
+        handleDragEnd(draggingNode, dropNode, dropType, ev) {
+          console.log('tree drag end:', draggingNode, dropNode, dropType);
+        },
+        showTrash() {
+          this.trashVisible = true;
+        },
+        restoreNote(note) {
+          const index = this.trashedNotes.findIndex(n => n.id === note.id);
+          if (index !== -1) {
+            const restoredNote = this.trashedNotes.splice(index, 1)[0];
+            this.notes.push(restoredNote);
+            this.saveNotes();
+            this.saveTrashedNotes();
+            this.$message({
+              type: 'success',
+              message: '笔记已恢复'
+            });
+          }
+        },
+        permanentlyDeleteNote(note) {
+          this.$confirm('此操作将永久删除该笔记, 是否继续?', '提示', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }).then(() => {
+            const index = this.trashedNotes.findIndex(n => n.id === note.id);
+            if (index !== -1) {
+              this.trashedNotes.splice(index, 1);
+              this.saveTrashedNotes();
+              this.$message({
+                type: 'success',
+                message: '永久删除成功!'
+              });
+            }
+          }).catch(() => {
+            this.$message({
+              type: 'info',
+              message: '已取消删除'
+            });          
+          });
+        },
+        searchNotes() {
+          // 搜索功能已通过计算属性 filteredNotes 实现
+        },
+        loadNotes() {
+          const savedNotes = localStorage.getItem('notes');
+          if (savedNotes) {
+            this.notes = JSON.parse(savedNotes);
+          }
+        },
+        saveNotes() {
+          localStorage.setItem('notes', JSON.stringify(this.notes));
+        },
+        loadTrashedNotes() {
+          const savedTrashedNotes = localStorage.getItem('trashedNotes');
+          if (savedTrashedNotes) {
+            this.trashedNotes = JSON.parse(savedTrashedNotes);
+          }
+        },
+        saveTrashedNotes() {
+          localStorage.setItem('trashedNotes', JSON.stringify(this.trashedNotes));
+        }
+      }
+    });
+  </script>
+</body></html>

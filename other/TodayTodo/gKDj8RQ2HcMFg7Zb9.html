@@ -1,0 +1,646 @@
+<html><head><base href="https://websim.creation.engine/cn/todo-app/" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>高级待办事项管理系统</title>
+<link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+<script src="https://unpkg.com/vue@2.6.14/dist/vue.js"></script>
+<script src="https://unpkg.com/element-ui/lib/index.js"></script>
+<script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.2/dist/echarts.min.js"></script>
+<style>
+  body {
+    font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+    background-color: #f0f2f5;
+    margin: 0;
+    padding: 20px;
+  }
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background-color: #fff;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+    padding: 20px;
+  }
+  .header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .announcement {
+    background-color: #f4f4f5;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+  }
+  .todo-list {
+    margin-bottom: 20px;
+  }
+  .todo-item {
+    margin-bottom: 10px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    padding: 10px;
+  }
+  .todo-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .todo-item-title {
+    font-weight: bold;
+  }
+  .todo-item-actions {
+    display: flex;
+    gap: 10px;
+  }
+  .subtasks {
+    margin-left: 20px;
+  }
+  .progress-bar {
+    height: 6px;
+    border-radius: 3px;
+    margin-top: 5px;
+  }
+  .calendar-view {
+    margin-bottom: 20px;
+  }
+  .statistics-view {
+    margin-bottom: 20px;
+  }
+  .reminder-section {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #dcdfe6;
+  }
+</style>
+</head>
+<body>
+  <div id="app" class="container">
+    <div class="header">
+      <h1>高级待办事项管理系统</h1>
+    </div>
+
+    <div class="announcement">
+      <el-carousel height="40px" direction="vertical" :autoplay="true">
+        <el-carousel-item v-for="item in announcements" :key="item">
+          <p>{{ item }}</p>
+        </el-carousel-item>
+      </el-carousel>
+    </div>
+
+    <el-tabs v-model="activeTab">
+      <el-tab-pane label="待办事项" name="todos">
+        <div class="todo-list">
+          <el-row :gutter="20">
+            <el-col :span="16">
+              <el-input
+                v-model="searchQuery"
+                placeholder="搜索待办事项"
+                prefix-icon="el-icon-search"
+                @input="searchTodos"
+              ></el-input>
+            </el-col>
+            <el-col :span="8">
+              <el-button type="primary" @click="showAddTodoDialog">添加待办事项</el-button>
+              <el-button type="danger" @click="batchDeleteTodos" :disabled="!selectedTodos.length">批量删除</el-button>
+            </el-col>
+          </el-row>
+
+          <el-row :gutter="20" style="margin-top: 20px;">
+            <el-col :span="24">
+              <el-select v-model="selectedTags" multiple placeholder="选择标签" @change="filterTodos">
+                <el-option
+                  v-for="tag in tags"
+                  :key="tag"
+                  :label="tag"
+                  :value="tag">
+                </el-option>
+                <el-option
+                  key="custom"
+                  label="自定义"
+                  value="custom">
+                  <el-input
+                    v-if="customTagInput"
+                    v-model="newCustomTag"
+                    size="mini"
+                    style="width: 100px;"
+                    @blur="addCustomTag"
+                    @keyup.enter.native="addCustomTag"
+                  ></el-input>
+                  <span v-else @click="customTagInput = true">自定义</span>
+                </el-option>
+              </el-select>
+              <el-select v-model="selectedStatus" multiple placeholder="选择状态" @change="filterTodos">
+                <el-option
+                  v-for="status in statusOptions"
+                  :key="status.value"
+                  :label="status.label"
+                  :value="status.value">
+                </el-option>
+              </el-select>
+            </el-col>
+          </el-row>
+
+          <el-table
+            :data="paginatedTodos"
+            style="width: 100%; margin-top: 20px;"
+            @selection-change="handleSelectionChange">
+            <el-table-column
+              type="selection"
+              width="55">
+            </el-table-column>
+            <el-table-column
+              prop="title"
+              label="标题"
+              width="180">
+            </el-table-column>
+            <el-table-column
+              prop="content"
+              label="内容">
+            </el-table-column>
+            <el-table-column
+              prop="createdAt"
+              label="创建时间"
+              width="180">
+            </el-table-column>
+            <el-table-column
+              prop="deadline"
+              label="截止时间"
+              width="180">
+            </el-table-column>
+            <el-table-column
+              prop="status"
+              label="状态"
+              width="120">
+              <template slot-scope="scope">
+                <el-tag :type="getStatusType(scope.row.status)">{{ getStatusLabel(scope.row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column
+              label="进度"
+              width="200">
+              <template slot-scope="scope">
+                <el-progress
+                  :percentage="scope.row.progress"
+                  :color="getProgressColor(scope.row.status)">
+                </el-progress>
+              </template>
+            </el-table-column>
+            <el-table-column
+              label="操作"
+              width="200">
+              <template slot-scope="scope">
+                <el-button
+                  size="mini"
+                  @click="handleEdit(scope.$index, scope.row)">编辑</el-button>
+                <el-button
+                  size="mini"
+                  type="danger"
+                  @click="handleDelete(scope.$index, scope.row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <el-pagination
+            @size-change="handleSizeChange"
+            @current-change="handleCurrentChange"
+            :current-page="currentPage"
+            :page-sizes="[5, 10, 20, 50]"
+            :page-size="pageSize"
+            layout="total, sizes, prev, pager, next, jumper"
+            :total="filteredTodos.length">
+          </el-pagination>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="日历视图" name="calendar">
+        <div class="calendar-view">
+          <el-row :gutter="20">
+            <el-col :span="6">
+              <el-radio-group v-model="calendarViewMode" @change="updateCalendarView">
+                <el-radio-button label="month">月视图</el-radio-button>
+                <el-radio-button label="week">周视图</el-radio-button>
+              </el-radio-group>
+            </el-col>
+            <el-col :span="18">
+              <el-date-picker
+                v-model="selectedDate"
+                :type="calendarViewMode === 'month' ? 'month' : 'week'"
+                format="yyyy 年 MM 月"
+                value-format="yyyy-MM-dd"
+                @change="updateCalendarView">
+              </el-date-picker>
+            </el-col>
+          </el-row>
+          <el-calendar v-if="calendarViewMode === 'month'" v-model="selectedDate">
+            <template slot="dateCell" slot-scope="{date, data}">
+              <p :class="data.isSelected ? 'is-selected' : ''">
+                {{ data.day.split('-').slice(2).join('-') }}
+                {{ getDayEvents(data.day) }}
+              </p>
+            </template>
+          </el-calendar>
+          <div v-else-if="calendarViewMode === 'week'" class="week-view">
+            <!-- 周视图的实现 -->
+          </div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="统计视图" name="statistics">
+        <div class="statistics-view">
+          <el-row :gutter="20">
+            <el-col :span="8">
+              <el-date-picker
+                v-model="statisticsDateRange"
+                type="daterange"
+                range-separator="至"
+                start-placeholder="开始日期"
+                end-placeholder="结束日期"
+                @change="updateStatistics">
+              </el-date-picker>
+            </el-col>
+            <el-col :span="8">
+              <el-select v-model="statisticsChartType" placeholder="选择图表类型" @change="updateStatistics">
+                <el-option label="柱状图" value="bar"></el-option>
+                <el-option label="折线图" value="line"></el-option>
+                <el-option label="饼图" value="pie"></el-option>
+              </el-select>
+            </el-col>
+          </el-row>
+          <div id="statisticsChart" style="width: 100%; height: 400px;"></div>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <div class="reminder-section">
+      <h2>待办提醒</h2>
+      <el-form :model="reminderForm" :rules="reminderRules" ref="reminderForm" label-width="100px">
+        <el-form-item label="提醒名称" prop="name">
+          <el-input v-model="reminderForm.name"></el-input>
+        </el-form-item>
+        <el-form-item label="提醒内容" prop="content">
+          <el-input type="textarea" v-model="reminderForm.content"></el-input>
+        </el-form-item>
+        <el-form-item label="提醒时间" prop="time">
+          <el-date-picker
+            v-model="reminderForm.time"
+            type="datetime"
+            placeholder="选择日期时间">
+          </el-date-picker>
+        </el-form-item>
+        <el-form-item label="重复次数" prop="repeatCount">
+          <el-input-number v-model="reminderForm.repeatCount" :min="1" :max="10"></el-input-number>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="setReminder">设置提醒</el-button>
+          <el-button @click="resetReminder">重置</el-button>
+        </el-form-item>
+      </el-form>
+
+      <h3>提醒历史</h3>
+      <el-table :data="reminderHistory" style="width: 100%">
+        <el-table-column prop="name" label="名称" width="180"></el-table-column>
+        <el-table-column prop="content" label="内容"></el-table-column>
+        <el-table-column prop="time" label="时间" width="180"></el-table-column>
+        <el-table-column label="操作" width="100">
+          <template slot-scope="scope">
+            <el-button
+              size="mini"
+              type="danger"
+              @click="deleteReminderHistory(scope.$index, scope.row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- 添加/编辑待办事项对话框 -->
+    <el-dialog :title="dialogTitle" :visible.sync="dialogVisible">
+      <el-form :model="todoForm" :rules="todoRules" ref="todoForm" label-width="100px">
+        <el-form-item label="标题" prop="title">
+          <el-input v-model="todoForm.title"></el-input>
+        </el-form-item>
+        <el-form-item label="内容" prop="content">
+          <el-input type="textarea" v-model="todoForm.content"></el-input>
+        </el-form-item>
+        <el-form-item label="创建时间">
+          <el-date-picker
+            v-model="todoForm.createdAt"
+            type="datetime"
+            placeholder="选择日期时间">
+          </el-date-picker>
+        </el-form-item>
+        <el-form-item label="截止时间" prop="deadline">
+          <el-date-picker
+            v-model="todoForm.deadline"
+            type="datetime"
+            placeholder="选择日期时间">
+          </el-date-picker>
+        </el-form-item>
+        <el-form-item label="状态" prop="status">
+          <el-select v-model="todoForm.status" placeholder="请选择状态">
+            <el-option
+              v-for="item in statusOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value">
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="标签" prop="tags">
+          <el-select v-model="todoForm.tags" multiple placeholder="请选择标签">
+            <el-option
+              v-for="tag in tags"
+              :key="tag"
+              :label="tag"
+              :value="tag">
+            </el-option>
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="dialogVisible = false">取 消</el-button>
+        <el-button type="primary" @click="submitTodoForm">确 定</el-button>
+      </div>
+    </el-dialog>
+  </div>
+
+  <script>
+    new Vue({
+      el: '#app',
+      data() {
+        return {
+          activeTab: 'todos',
+          todos: [],
+          filteredTodos: [],
+          selectedTodos: [],
+          searchQuery: '',
+          dialogVisible: false,
+          dialogTitle: '添加待办事项',
+          todoForm: {
+            title: '',
+            content: '',
+            createdAt: '',
+            deadline: '',
+            status: 'pending',
+            tags: [],
+            progress: 0
+          },
+          todoRules: {
+            title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
+            content: [{ required: true, message: '请输入内容', trigger: 'blur' }],
+            deadline: [{ required: true, message: '请选择截止时间', trigger: 'change' }]
+          },
+          statusOptions: [
+            { value: 'pending', label: '待完成' },
+            { value: 'inProgress', label: '进行中' },
+            { value: 'improving', label: '改进中' },
+            { value: 'completed', label: '已完成' }
+          ],
+          tags: ['工作', '生活', '学习', '副业'],
+          selectedTags: [],
+          selectedStatus: [],
+          customTagInput: false,
+          newCustomTag: '',
+          currentPage: 1,
+          pageSize: 5,
+          calendarViewMode: 'month',
+          selectedDate: new Date(),
+          statisticsDateRange: [],
+          statisticsChartType: 'bar',
+          reminderForm: {
+            name: '',
+            content: '',
+            time: '',
+            repeatCount: 1
+          },
+          reminderRules: {
+            name: [{ required: true, message: '请输入提醒名称', trigger: 'blur' }],
+            content: [{ required: true, message: '请输入提醒内容', trigger: 'blur' }],
+            time: [{ type: 'date', required: true, message: '请选择提醒时间', trigger: 'change' }]
+          },
+          reminderHistory: [],
+          announcements: [
+            '相信自己，你可以做到！',
+            '每一个小进步都是成功的开始。',
+            '保持专注，坚持不懈，你就是最棒的！',
+            '困难只是暂时的，坚持就是胜利。',
+            '今天的努力是明天的收获，加油！'
+          ]
+        };
+      },
+      computed: {
+        paginatedTodos() {
+          const start = (this.currentPage - 1) * this.pageSize;
+          const end = start + this.pageSize;
+          return this.filteredTodos.slice(start, end);
+        }
+      },
+      methods: {
+        showAddTodoDialog() {
+          this.dialogTitle = '添加待办事项';
+          this.todoForm = {
+            title: '',
+            content: '',
+            createdAt: new Date(),
+            deadline: '',
+            status: 'pending',
+            tags: [],
+            progress: 0
+          };
+          this.dialogVisible = true;
+        },
+        submitTodoForm() {
+          this.$refs.todoForm.validate((valid) => {
+            if (valid) {
+              if (this.dialogTitle === '添加待办事项') {
+                this.todos.push({ ...this.todoForm, id: Date.now() });
+              } else {
+                const index = this.todos.findIndex(todo => todo.id === this.todoForm.id);
+                if (index !== -1) {
+                  this.todos.splice(index, 1, { ...this.todoForm });
+                }
+              }
+              this.dialogVisible = false;
+              this.filterTodos();
+              this.saveTodos();
+            }
+          });
+        },
+        handleEdit(index, row) {
+          this.dialogTitle = '编辑待办事项';
+          this.todoForm = { ...row };
+          this.dialogVisible = true;
+        },
+        handleDelete(index, row) {
+          this.$confirm('确认删除该待办事项吗？', '提示', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }).then(() => {
+            const todoIndex = this.todos.findIndex(todo => todo.id === row.id);
+            if (todoIndex !== -1) {
+              this.todos.splice(todoIndex, 1);
+              this.filterTodos();
+              this.saveTodos();
+            }
+          }).catch(() => {});
+        },
+        handleSelectionChange(val) {
+          this.selectedTodos = val;
+        },
+        batchDeleteTodos() {
+          this.$confirm(`确认删除选中的 ${this.selectedTodos.length} 个待办事项吗？`, '提示', {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }).then(() => {
+            const selectedIds = this.selectedTodos.map(todo => todo.id);
+            this.todos = this.todos.filter(todo => !selectedIds.includes(todo.id));
+            this.filterTodos();
+            this.saveTodos();
+          }).catch(() => {});
+        },
+        searchTodos() {
+          this.filterTodos();
+        },
+        filterTodos() {
+          this.filteredTodos = this.todos.filter(todo => {
+            const matchSearch = todo.title.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+                                todo.content.toLowerCase().includes(this.searchQuery.toLowerCase());
+            const matchTags = this.selectedTags.length === 0 || todo.tags.some(tag => this.selectedTags.includes(tag));
+            const matchStatus = this.selectedStatus.length === 0 || this.selectedStatus.includes(todo.status);
+            return matchSearch && matchTags && matchStatus;
+          });
+        },
+        handleSizeChange(val) {
+          this.pageSize = val;
+          this.currentPage = 1;
+        },
+        handleCurrentChange(val) {
+          this.currentPage = val;
+        },
+        getStatusType(status) {
+          const statusMap = {
+            pending: 'info',
+            inProgress: 'warning',
+            improving: '',
+            completed: 'success'
+          };
+          return statusMap[status] || 'info';
+        },
+        getStatusLabel(status) {
+          const statusMap = {
+            pending: '待完成',
+            inProgress: '进行中',
+            improving: '改进中',
+            completed: '已完成'
+          };
+          return statusMap[status] || '未知';
+        },
+        getProgressColor(status) {
+          const colorMap = {
+            pending: '#909399',
+            inProgress: '#E6A23C',
+            improving: '#F56C6C',
+            completed: '#67C23A'
+          };
+          return colorMap[status] || '#909399';
+        },
+        addCustomTag() {
+          if (this.newCustomTag && !this.tags.includes(this.newCustomTag)) {
+            this.tags.push(this.newCustomTag);
+            this.selectedTags.push(this.newCustomTag);
+            this.newCustomTag = '';
+          }
+          this.customTagInput = false;
+        },
+        updateCalendarView() {
+          // 更新日历视图的逻辑
+        },
+        getDayEvents(day) {
+          const events = this.todos.filter(todo => {
+            const todoDate = new Date(todo.deadline).toISOString().split('T')[0];
+            return todoDate === day;
+          });
+          return events.map(event => event.title).join(', ');
+        },
+        updateStatistics() {
+          // 更新统计图表的逻辑
+          this.$nextTick(() => {
+            const chartDom = document.getElementById('statisticsChart');
+            const myChart = echarts.init(chartDom);
+            const option = this.getChartOption();
+            myChart.setOption(option);
+          });
+        },
+        getChartOption() {
+          // 根据 statisticsChartType 和 statisticsDateRange 生成图表配置
+          // 这里只是一个示例，您需要根据实际数据进行调整
+          const option = {
+            title: {
+              text: '待办事项统计'
+            },
+            tooltip: {},
+            legend: {
+              data: ['待完成', '进行中', '改进中', '已完成']
+            },
+            xAxis: {
+              data: ['工作', '生活', '学习', '副业']
+            },
+            yAxis: {},
+            series: [{
+              name: '待完成',
+              type: this.statisticsChartType,
+              data: [5, 20, 36, 10]
+            }, {
+              name: '进行中',
+              type: this.statisticsChartType,
+              data: [15, 10, 26, 20]
+            }, {
+              name: '改进中',
+              type: this.statisticsChartType,
+              data: [2, 5, 3, 1]
+            }, {
+              name: '已完成',
+              type: this.statisticsChartType,
+              data: [30, 15, 20, 5]
+            }]
+          };
+          return option;
+        },
+        setReminder() {
+          this.$refs.reminderForm.validate((valid) => {
+            if (valid) {
+              // 设置提醒的逻辑
+              this.reminderHistory.push({ ...this.reminderForm });
+              this.$message.success('提醒已设置');
+              this.$refs.reminderForm.resetFields();
+            }
+          });
+        },
+        resetReminder() {
+          this.$refs.reminderForm.resetFields();
+        },
+        deleteReminderHistory(index, row) {
+          this.reminderHistory.splice(index, 1);
+        },
+        saveTodos() {
+          localStorage.setItem('todos', JSON.stringify(this.todos));
+        },
+        loadTodos() {
+          const savedTodos = localStorage.getItem('todos');
+          if (savedTodos) {
+            this.todos = JSON.parse(savedTodos);
+            this.filterTodos();
+          }
+        }
+      },
+      mounted() {
+        this.loadTodos();
+        this.updateStatistics();
+      }
+    });
+  </script>
+</body>
+</html>
